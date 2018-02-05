@@ -1,520 +1,362 @@
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "types.h"
-#include "printer.h"
+#include <inttypes.h>
 
-#ifdef USE_GC
-void nop_free(void* ptr) {
-    (void)ptr; // Unused argument
+#include "types.h"
+
+void destroy_mal_value(MalValue *v) {
+	if (!v) return;
+	switch(v->type) {
+		case List:
+		case Number:
+		case Symbol:
+		case String:
+			free(v);
+		case Nil:
+		case True:
+		case False:
+			break; // do nothing
+		case Keyword:
+		case Vector:
+		case HashMap:
+		case Atom:
+		default:
+			break;
+	}
 }
 
-static GMemVTable gc_gmem_vtable = {
-    .malloc = GC_malloc,
-    .realloc = GC_realloc,
-    .free = nop_free,
-    .calloc = NULL,
-    .try_malloc = NULL,
-    .try_realloc = NULL
+// LIST
+
+MalValue *mal_list() {
+	MalValue *r;
+	size_t r_size = (sizeof *r + sizeof(MalList) + 3) / 4 * 4;
+	r = malloc(r_size);
+	if (r == NULL) return r;
+	r->type = List;
+	r->gc_mark = 0;
+	((MalList*)r->value)->first = NULL;
+	((MalList*)r->value)->count = 0;
+	return r;
+}
+
+MalValue *mal_list_from(MalValue *el) {
+	MalValue *r = mal_list();
+	MalList *list = (MalList*)r->value;
+	list->first = el;
+	list->count = 1;
+	list->rest = NULL;
+	return r;
+}
+
+MalValue *add_last_mutating(MalValue *h, MalValue *el) {
+	MalValue *new = mal_list();
+	if (!new) return NULL;
+	MalList *l = (MalList*)h->value;
+	while (l->rest) {
+		++l->count;
+		l = (MalList*)l->rest->value;
+	}
+	l->rest = new;
+	l = (MalList*)new->value;
+	l->first = el;
+	l->count = 1;
+	l->rest = NULL;
+	return new;
+}
+
+MalValue empty_list = {
+	.type = List,
 };
 
-void GC_setup() {
-    GC_INIT();
-    setenv("G_SLICE", "always-malloc", 1);
-    g_mem_gc_friendly = TRUE;
-    g_mem_set_vtable(&gc_gmem_vtable);
+// NUMBER
+
+MalNumber parse_number(char *token) {
+	MalIntValue intval;
+	MalFloatValue floatval;
+	int success;
+	MalNumber r = { .value.INT = 0, .type = NONE };
+	
+	success = sscanf(token, "%" PRId64, &intval) +
+		(sscanf(token, "%lf", &floatval) << 1);
+	switch (success) {
+		case 3:
+			if (intval == floatval) goto parse_number_int;
+		case 2:
+			r.type = FLOAT;
+			r.value.FLOAT = floatval;
+			break;
+		case 1:
+		parse_number_int:
+			r.type = INT;
+			r.value.INT = intval;
+		default:
+			break;
+	}
+	return r;
 }
 
-char* GC_strdup(const char *src) {
-    if (!src) {
-        return NULL;
-    }
-    char* dst = (char*)MAL_GC_MALLOC(strlen(src) + 1);
-    strcpy(dst, src);
-    return dst;
-}
-#endif
-
-
-// Errors/Exceptions
-
-MalVal *mal_error = NULL; // WARNGIN: global state
-void _error(const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    mal_error = malval_new_string(g_strdup_vprintf(fmt, args));
+static MalValue *mal_number() {
+	MalValue *r;
+	size_t r_size = sizeof *r + sizeof(MalNumber);
+	r_size = (r_size + 3) / 4 * 4;
+	r = malloc(r_size);
+	if (r == NULL) return r;
+	r->type = Number;
+	r->gc_mark = 0;
+	return r;
 }
 
-// Constant atomic values
-
-MalVal mal_nil = {MAL_NIL, NULL, {0}, 0};
-MalVal mal_true = {MAL_TRUE, NULL, {0}, 0};
-MalVal mal_false = {MAL_FALSE, NULL, {0}, 0};
-
-
-// General Functions
-
-// Print a hash table
-#include <glib-object.h>
-void g_hash_table_print(GHashTable *hash_table) {
-    GHashTableIter iter;
-    gpointer key, value;
-
-    g_hash_table_iter_init (&iter, hash_table);
-    while (g_hash_table_iter_next (&iter, &key, &value)) {
-        g_print ("%s/%p ", (const char *) key, (void *) value);
-        //g_print ("%s ", (const char *) key);
-    }
+MalValue *mal_number_int(MalIntValue value) {
+	MalValue *r = mal_number();
+	if (r == NULL) return r;
+	*(MalNumber*)r->value = (MalNumber){ .value.INT = value, .type = INT };
+	return r;
 }
 
-GHashTable *g_hash_table_copy(GHashTable *src_table) {
-    GHashTable *new_table = g_hash_table_new(g_str_hash, g_str_equal);
-    GHashTableIter iter;
-    gpointer key, value;
-
-    g_hash_table_iter_init (&iter, src_table);
-    while (g_hash_table_iter_next (&iter, &key, &value)) {
-        g_hash_table_insert(new_table, key, value);
-    }
-    return new_table;
+MalValue *mal_number_float(MalFloatValue value) {
+	MalValue *r = mal_number();
+	if (r == NULL) return r;
+	*(MalNumber*)r->value = (MalNumber){ .value.FLOAT = value, .type = FLOAT };
+	return r;
 }
 
-int min(int a, int b) { return a < b ? a : b; }
-int max(int a, int b) { return a > b ? a : b; }
-
-int _count(MalVal *obj) {
-    switch (obj->type) {
-    case MAL_NIL:      return 0;
-    case MAL_LIST:     return obj->val.array->len;
-    case MAL_VECTOR:   return obj->val.array->len;
-    case MAL_HASH_MAP: return g_hash_table_size(obj->val.hash_table);
-    case MAL_STRING:   return strlen(obj->val.string);
-    default:
-        _error("count unsupported for type %d\n", obj->type);
-        return 0;
-    }
+MalValue *mal_number_from(char *token) {
+	MalNumber n = parse_number(token);
+	if (n.type == NONE) return NULL;
+	MalValue *r = mal_number();
+	if (r == NULL) return r;
+	*(MalNumber*)r->value = n;
+	return r;
 }
 
-// Allocate a malval and set its type and value
-MalVal *malval_new(MalType type, MalVal *metadata) {
-    MalVal *mv = (MalVal*)MAL_GC_MALLOC(sizeof(MalVal));
-    mv->type = type;
-    mv->metadata = metadata;
-    return mv;
+// SYMBOL
+
+MalValue *mal_symbol(char *token, size_t length) {
+	MalValue *r;
+	size_t r_size = sizeof *r + length + 1;
+	r_size = (r_size + 3) / 4 * 4;
+	r = malloc(r_size);
+	if (r == NULL) return r;
+	r->type = Symbol;
+	r->gc_mark = 0;
+	strcpy((MalSymbol)r->value, token);
+	return r;
 }
 
-void malval_free(MalVal *mv) {
-    // TODO: free collection items
-    if (!(mv->type & (MAL_NIL|MAL_TRUE|MAL_FALSE))) {
-        MAL_GC_FREE(mv);
-    }
+// NIL
+
+MalValue mal_nil = { .type = Nil };
+
+int is_nil(MalValue *other) {
+	return other == &mal_nil;
 }
 
-MalVal *malval_new_integer(gint64 val) {
-    MalVal *mv = malval_new(MAL_INTEGER, NULL);
-    mv->val.intnum = val;
-    return mv;
+// TRUE
+
+MalValue mal_true = { .type = True };
+
+int is_true(MalValue *other) {
+	return other == &mal_true;
 }
 
-MalVal *malval_new_float(gdouble val) {
-    MalVal *mv = malval_new(MAL_FLOAT, NULL);
-    mv->val.floatnum = val;
-    return mv;
+int truthy(MalValue *other) {
+	return !is_false(other) && !is_nil(other);
 }
 
-MalVal *malval_new_string(char *val) {
-    MalVal *mv = malval_new(MAL_STRING, NULL);
-    mv->val.string = val;
-    return mv;
+// FALSE
+
+MalValue mal_false = { .type = False };
+
+int is_false(MalValue *other) {
+	return other == &mal_false;
 }
 
-MalVal *malval_new_symbol(char *val) {
-    MalVal *mv = malval_new(MAL_SYMBOL, NULL);
-    mv->val.string = val;
-    return mv;
+int falsey(MalValue *other) {
+	return is_false(other) || is_nil(other);
 }
 
-MalVal *malval_new_keyword(char *val) {
-    MalVal *mv = malval_new(MAL_STRING, NULL);
-    mv->val.string = g_strdup_printf("\x7f%s", val);
-    return mv;
+// STRING
+
+MalValue *mal_string(char *value, size_t len) {
+	MalValue *r;
+	size_t r_size = sizeof *r + sizeof(MalString) + len;
+	r_size = (r_size + 3) / 4 * 4;
+	r = malloc(r_size);
+	if (r == NULL) return r;
+	r->type = String;
+	r->gc_mark = 0;
+	memcpy(((MalString*)r->value)->string, value, len);
+	((MalString*)r->value)->length = len;
+	return r;
 }
 
-MalVal *malval_new_list(MalType type, GArray *val) {
-    MalVal *mv = malval_new(type, NULL);
-    mv->val.array = val;
-    return mv;
+static size_t unescape_mal_string(char *buf, char *value, size_t len, int *err);
+
+MalValue *mal_string_from(char *token, size_t len) {
+	char buf[(len - 2) * 4]; // -2 quotes, x4 unicode
+	int err;
+	len = unescape_mal_string(buf, token + 1, len - 2, &err);
+	if (err) return NULL;
+	return mal_string(buf, len);
 }
 
-MalVal *malval_new_hash_map(GHashTable *val) {
-    MalVal *mv = malval_new(MAL_HASH_MAP, NULL);
-    mv->val.hash_table = val;
-    return mv;
-}
+static int unescape_hex(char **buffer, char **token, int *err);
+static int unescape_unicode(char **buffer, char **token, int *err);
+static int unescape_octal(char **buffer, char **token, int *err);
+static int16_t hex2i(char);
+/*
+ * we escape: \", \\, \b, \f, \n, \r, \t, \ooo, \xXX, \uXXXX, \UXXXXXXXX
+ */
+static size_t unescape_mal_string(char *buffer, char *token, size_t len, int *err) {
+	char *end = token + len;
+	char *start = buffer;
 
-MalVal *malval_new_atom(MalVal *val) {
-    MalVal *mv = malval_new(MAL_ATOM, NULL);
-    mv->val.atom_val = val;
-    return mv;
-}
+	while(token < end) {
+		if (*token == '\\') {
+			switch(*(++token)) {
+			case '"':
+			case '\\':
+				*buffer++ = *token; ++token; break;
+			case 'b':
+				*buffer++ = 0x08; ++token; break;
+			case 'f':
+				*buffer++ = 0x0c; ++token; break;
+			case 'n':
+				*buffer++ = 0x0a; ++token; break;
+			case 'r':
+				*buffer++ = 0x0d; ++token; break;
+			case 't':
+				*buffer++ = 0x09; ++token; break;
+			case 'v':
+				*buffer++ = 0x0b; ++token; break;
+			case 'x':
+				unescape_hex(&buffer, &token, err); break;
+			case 'u':
+			case 'U':
+				unescape_unicode(&buffer, &token, err); break;
+			default:
+				if (*token >= '0' && *token < '8') {
+					unescape_octal(&buffer, &token, err);
+				} else {
+					*err = 1;
+					return buffer - start;
+				}
+			}
 
+		} else {
+			*buffer++ = *token++;
+		}
+	}
 
-MalVal *malval_new_function(void *(*func)(void *), int arg_cnt) {
-    MalVal *mv = malval_new(MAL_FUNCTION_C, NULL);
-    mv->func_arg_cnt = arg_cnt;
-    assert(mv->func_arg_cnt <= 20,
-            "native function restricted to 20 args (%d given)",
-            mv->func_arg_cnt);
-    mv->ismacro = FALSE;
-    switch (arg_cnt) {
-    case -1: mv->val.f1  = (void *(*)(void*))func; break;
-    case 0:  mv->val.f0  = (void *(*)())func; break;
-    case 1:  mv->val.f1  = (void *(*)(void*))func; break;
-    case 2:  mv->val.f2  = (void *(*)(void*,void*))func; break;
-    case 3:  mv->val.f3  = (void *(*)(void*,void*,void*))func; break;
-    case 4:  mv->val.f4  = (void *(*)(void*,void*,void*,void*))func; break;
-    case 5:  mv->val.f5  = (void *(*)(void*,void*,void*,void*,void*))func; break;
-    case 6:  mv->val.f6  = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*))func; break;
-    case 7:  mv->val.f7  = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*))func; break;
-    case 8:  mv->val.f8  = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*))func; break;
-    case 9:  mv->val.f9  = (void *(*)(void*,void*,void*,void*,void*,
-                                       void*,void*,void*,void*))func; break;
-    case 10: mv->val.f10 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*))func; break;
-    case 11: mv->val.f11 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*))func; break;
-    case 12: mv->val.f12 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*))func; break;
-    case 13: mv->val.f13 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*))func; break;
-    case 14: mv->val.f14 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*))func; break;
-    case 15: mv->val.f15 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*))func; break;
-    case 16: mv->val.f16 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*))func; break;
-    case 17: mv->val.f17 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*))func; break;
-    case 18: mv->val.f18 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*))func; break;
-    case 19: mv->val.f19 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*))func; break;
-    case 20: mv->val.f20 = (void *(*)(void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*,
-                                      void*,void*,void*,void*,void*))func; break;
-    }
-    return mv;
-}
-
-MalVal *_apply(MalVal *f, MalVal *args) {
-    MalVal *res;
-    assert_type(f, MAL_FUNCTION_C|MAL_FUNCTION_MAL,
-                "Cannot invoke %s", _pr_str(f,1));
-    if (f->type & MAL_FUNCTION_MAL) {
-        Env *fn_env = new_env(f->val.func.env, f->val.func.args, args);
-        res = f->val.func.evaluator(f->val.func.body, fn_env);
-        return res;
-    } else {
-        MalVal *a = args;
-        assert((f->func_arg_cnt == -1) ||
-               (f->func_arg_cnt == _count(args)),
-               "Length of formal params (%d) does not match actual parameters (%d)",
-               f->func_arg_cnt, _count(args));
-        switch (f->func_arg_cnt) {
-        case -1: res=f->val.f1 (a); break;
-        case 0:  res=f->val.f0 (); break;
-        case 1:  res=f->val.f1 (_nth(a,0)); break;
-        case 2:  res=f->val.f2 (_nth(a,0),_nth(a,1)); break;
-        case 3:  res=f->val.f3 (_nth(a,0),_nth(a,1),_nth(a,2)); break;
-        case 4:  res=f->val.f4 (_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3)); break;
-        case 5:  res=f->val.f5 (_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4)); break;
-        case 6:  res=f->val.f6 (_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5)); break;
-        case 7:  res=f->val.f7 (_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6)); break;
-        case 8:  res=f->val.f8 (_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7)); break;
-        case 9:  res=f->val.f9 (_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8)); break;
-        case 10: res=f->val.f10(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9)); break;
-        case 11: res=f->val.f11(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9),
-                                _nth(a,10)); break;
-        case 12: res=f->val.f12(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9),
-                                _nth(a,10),_nth(a,11)); break;
-        case 13: res=f->val.f13(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9),
-                                _nth(a,10),_nth(a,11),_nth(a,12)); break;
-        case 14: res=f->val.f14(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9),
-                                _nth(a,10),_nth(a,11),_nth(a,12),_nth(a,13)); break;
-        case 15: res=f->val.f15(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9),
-                                _nth(a,10),_nth(a,11),_nth(a,12),_nth(a,13),_nth(a,14)); break;
-        case 16: res=f->val.f16(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9),
-                                _nth(a,10),_nth(a,11),_nth(a,12),_nth(a,13),_nth(a,14),
-                                _nth(a,15)); break;
-        case 17: res=f->val.f17(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9),
-                                _nth(a,10),_nth(a,11),_nth(a,12),_nth(a,13),_nth(a,14),
-                                _nth(a,15),_nth(a,16)); break;
-        case 18: res=f->val.f18(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9),
-                                _nth(a,10),_nth(a,11),_nth(a,12),_nth(a,13),_nth(a,14),
-                                _nth(a,15),_nth(a,16),_nth(a,17)); break;
-        case 19: res=f->val.f19(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9),
-                                _nth(a,10),_nth(a,11),_nth(a,12),_nth(a,13),_nth(a,14),
-                                _nth(a,15),_nth(a,16),_nth(a,17),_nth(a,18)); break;
-        case 20: res=f->val.f20(_nth(a,0),_nth(a,1),_nth(a,2),_nth(a,3),_nth(a,4),
-                                _nth(a,5),_nth(a,6),_nth(a,7),_nth(a,8),_nth(a,9),
-                                _nth(a,10),_nth(a,11),_nth(a,12),_nth(a,13),_nth(a,14),
-                                _nth(a,15),_nth(a,16),_nth(a,17),_nth(a,18),_nth(a,19)); break;
-        }
-        return res;
-    }
+	return buffer - start;
 }
 
 
-int _equal_Q(MalVal *a, MalVal *b) {
-    GHashTableIter iter;
-    gpointer key, value;
+static int unescape_hex(char **_buffer, char **_token, int *err) {
+	char a, b;
+	char *buffer = *_buffer, *token = *_token;
+	if (-1 == (a = hex2i(*token++))) {
+		*err = 1;
+		return 0;
+	}
 
-    if (a == NULL || b == NULL) { return FALSE; }
+	if (-1 != (b = hex2i(*token++))) { // x++ > *x
+		a = (a << 4u) + b;
+	}
+	*buffer++ = a;
 
-    // If types are the same or both are sequential then they might be equal
-    if (!((a->type == b->type) ||
-          (_sequential_Q(a) && _sequential_Q(b)))) {
-        return FALSE;
-    }
-    switch (a->type) {
-    case MAL_NIL:
-    case MAL_TRUE:
-    case MAL_FALSE:
-        return a->type == b->type;
-    case MAL_INTEGER:
-        return a->val.intnum == b->val.intnum;
-    case MAL_FLOAT:
-        return a->val.floatnum == b->val.floatnum;
-    case MAL_SYMBOL:
-    case MAL_STRING:
-        if (strcmp(a->val.string, b->val.string) == 0) {
-            return TRUE;
-        } else {
-            return FALSE;
-        }
-    case MAL_LIST:
-    case MAL_VECTOR:
-        if (a->val.array->len != b->val.array->len) {
-            return FALSE;
-        }
-        int i;
-        for (i=0; i<a->val.array->len; i++) {
-            if (! _equal_Q(g_array_index(a->val.array, MalVal*, i),
-                           g_array_index(b->val.array, MalVal*, i))) {
-                return FALSE;
-            }
-        }
-        return TRUE;
-    case MAL_HASH_MAP:
-        if (g_hash_table_size(a->val.hash_table) !=
-            g_hash_table_size(b->val.hash_table)) {
-            return FALSE;
-        }
-        g_hash_table_iter_init (&iter, a->val.hash_table);
-        while (g_hash_table_iter_next (&iter, &key, &value)) {
-            if (!g_hash_table_contains(b->val.hash_table, key)) {
-                return FALSE;
-            }
-            MalVal *aval = (MalVal *) g_hash_table_lookup(a->val.hash_table, key);
-            MalVal *bval = (MalVal *) g_hash_table_lookup(b->val.hash_table, key);
-            if (!_equal_Q(aval, bval)) {
-                return FALSE;
-            }
-        }
-        return TRUE;
-    case MAL_FUNCTION_C:
-    case MAL_FUNCTION_MAL:
-        return a->val.f0 == b->val.f0;
-    default:
-        _error("_equal_Q unsupported comparison type %d\n", a->type);
-        return FALSE;
-    }
+	while (-1 != b && -1 != (a = hex2i(*token++))) {
+		if (-1 != (b = hex2i(*token++))) {
+			a = (a << 4u) + b;
+		}
+		*buffer++ = a;
+	}
+	*_buffer = buffer;
+	*_token = token;
+	return 1;
+}
+
+static int unescape_unicode(char **_buffer, char **_token, int *err) {
+	int16_t a, b, c, d;
+	int32_t code;
+	char *buffer = *_buffer, *token = *_token;
+	if (-1 != (a = hex2i(*(token + 1))) &&
+		-1 != (b = hex2i(*(token + 2))) &&
+		-1 != (c = hex2i(*(token + 3)))	&&
+		-1 != (d = hex2i(*(token + 4)))) {
+		
+		code = d + (c << 4u) + (b << 8u) + (a << 12u);
+		
+		if ('U' == *token) {
+			if (-1 != (a = hex2i(*(token + 5))) &&
+				-1 != (b = hex2i(*(token + 6))) &&
+				-1 != (c = hex2i(*(token + 7))) &&
+				-1 != (d = hex2i(*(token + 8)))) {
+				code = d + (c << 4u) + (b << 8u) + (a << 12u) + (code << 16u);
+				token += 4;
+			} else {
+				goto unescape_unicode_err;
+			}
+		}
+
+		token += 5;
+
+		if (code < 0x80) {
+			*buffer++ = code;
+		} else if (code < 0x800) {
+			*buffer++ = 192 + code / 64;
+			*buffer++ = 128 + code % 64;
+		} else if (code - 0xd800u < 0x800) {
+			goto unescape_unicode_err;
+		} else if (code < 0x10000) {
+			*buffer++ = 224 + code / 4096;
+			*buffer++ = 128 + code / 64 % 64;
+			*buffer++ = 128 + code % 64;
+		} else if (code < 0x110000) {
+			*buffer++ = 240 + code / 262144;
+			*buffer++ = 128 + code / 4096 % 64;
+			*buffer++ = 128 + code / 64 % 64;
+			*buffer++ = 128 + code % 64;
+		} else {
+			goto unescape_unicode_err;
+		}
+		*_buffer = buffer;
+		*_token = token;
+		return 1;
+	} else {
+		unescape_unicode_err:
+		*err = 1;
+		return 0;
+	}
+
+}
+
+static int unescape_octal(char **_buffer, char **_token, int *err) {
+	char *buffer = *_buffer, *token = *_token;
+	if (*token >= '0' && *token < '8') {
+		*buffer = *token++ - '0';
+		if (*token >= '0' && *token < '8') {
+			*buffer += *token++ - '0';
+			if (*token >= '0' && *token < '8') {
+				*buffer += *token++ - '0';
+			}
+		}
+		*_buffer = buffer;
+		*_token = token;
+		return 1;
+	} else {
+	    *err = 1;
+		return 0;
+	}
+}
+
+static int16_t hex2i(char c) {
+	return c >= '0' && c <= '9' ?
+		c - '0' :
+		(c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f') ?
+		(c & ~0x20) - 'A' + 10 :
+		-1;
 }
 
 
-// Lists
-MalVal *_listX(int count, ...) {
-    MalVal *seq = malval_new_list(MAL_LIST,
-                                  g_array_sized_new(TRUE, TRUE, sizeof(MalVal*),
-                                                    count));
-    MalVal *v;
-    va_list ap;
-    va_start(ap, count);
-    while (count-- > 0) {
-        v = va_arg(ap, MalVal*);
-        g_array_append_val(seq->val.array, v);
-    }
-    va_end(ap);
-    return seq;
-}
-
-MalVal *_list(MalVal *args) {
-    assert_type(args, MAL_LIST|MAL_VECTOR,
-                "list called with invalid arguments");
-    args->type = MAL_LIST;
-    return args;
-}
-
-int _list_Q(MalVal *seq) {
-    return seq->type & MAL_LIST;
-}
-
-
-// Vectors
-MalVal *_vector(MalVal *args) {
-    assert_type(args, MAL_LIST|MAL_VECTOR,
-                "vector called with invalid arguments");
-    args->type = MAL_VECTOR;
-    return args;
-}
-
-int _vector_Q(MalVal *seq) {
-    return seq->type & MAL_VECTOR;
-}
-
-
-// Hash maps
-MalVal *_hash_map(MalVal *args) {
-    assert_type(args, MAL_LIST|MAL_VECTOR,
-                "hash-map called with non-sequential arguments");
-    GHashTable *htable = g_hash_table_new(g_str_hash, g_str_equal);
-    MalVal *hm = malval_new_hash_map(htable);
-    return _assoc_BANG(hm, args);
-}
-
-int _hash_map_Q(MalVal *seq) {
-    return seq->type & MAL_HASH_MAP;
-}
-
-MalVal *_assoc_BANG(MalVal* hm, MalVal *args) {
-    assert((_count(args) % 2) == 0,
-           "odd number of parameters to assoc!");
-    GHashTable *htable = hm->val.hash_table;
-    int i;
-    MalVal *k, *v;
-    for (i=0; i<_count(args); i+=2) {
-        k = g_array_index(args->val.array, MalVal*, i);
-        assert_type(k, MAL_STRING,
-                    "assoc! called with non-string key");
-        v = g_array_index(args->val.array, MalVal*, i+1);
-        g_hash_table_insert(htable, k->val.string, v);
-    }
-    return hm;
-}
-
-MalVal *_dissoc_BANG(MalVal* hm, MalVal *args) {
-    GHashTable *htable = hm->val.hash_table;
-    int i;
-    MalVal *k, *v;
-    for (i=0; i<_count(args); i++) {
-        k = g_array_index(args->val.array, MalVal*, i);
-        assert_type(k, MAL_STRING,
-                    "dissoc! called with non-string key");
-        g_hash_table_remove(htable, k->val.string);
-    }
-    return hm;
-}
-
-
-// Atoms
-int _atom_Q(MalVal *exp) {
-    return exp->type & MAL_ATOM;
-}
-
-
-// Sequence functions
-MalVal *_slice(MalVal *seq, int start, int end) {
-    int i, new_len = max(0, min(end-start,
-                                _count(seq)-start));
-    GArray *new_arr = g_array_sized_new(TRUE, TRUE, sizeof(MalVal*),
-                                        new_len);
-    for (i=start; i<start+new_len; i++) {
-        g_array_append_val(new_arr, g_array_index(seq->val.array, MalVal*, i));
-    }
-    return malval_new_list(MAL_LIST, new_arr);
-}
-
-
-int _sequential_Q(MalVal *seq) {
-    return seq->type & (MAL_LIST|MAL_VECTOR);
-}
-
-MalVal *_nth(MalVal *seq, int idx) {
-    assert_type(seq, MAL_LIST|MAL_VECTOR,
-                "_nth called with non-sequential");
-    if (idx >= _count(seq)) {
-        abort("nth: index out of range");
-    }
-    return g_array_index(seq->val.array, MalVal*, idx);
-}
-
-MalVal *_first(MalVal *seq) {
-    assert_type(seq, MAL_NIL|MAL_LIST|MAL_VECTOR,
-                "_first called with non-sequential");
-    if (_count(seq) == 0) {
-        return &mal_nil;
-    }
-    return g_array_index(seq->val.array, MalVal*, 0);
-}
-
-MalVal *_last(MalVal *seq) {
-    assert_type(seq, MAL_LIST|MAL_VECTOR,
-                "_last called with non-sequential");
-    if (_count(seq) == 0) {
-        return &mal_nil;
-    }
-    return g_array_index(seq->val.array, MalVal*, _count(seq)-1);
-}
-
-
-MalVal *_rest(MalVal *seq) {
-    return _slice(seq, 1, _count(seq));
-}
-
-
-MalVal *_map2(MalVal *(*func)(void*, void*), MalVal *lst, void *arg2) {
-    MalVal *e, *el;
-    assert_type(lst, MAL_LIST|MAL_VECTOR,
-                "_map called with non-sequential");
-    int i, len = _count(lst);
-    el = malval_new_list(MAL_LIST,
-                         g_array_sized_new(TRUE, TRUE, sizeof(MalVal*), len));
-    for (i=0; i<len; i++) {
-        e = func(g_array_index(lst->val.array, MalVal*, i), arg2);
-        if (!e || mal_error) return NULL;
-        g_array_append_val(el->val.array, e);
-    }
-    return el;
-}

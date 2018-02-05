@@ -1,23 +1,21 @@
-#ifndef __MAL_READER__
-#define __MAL_READER__
+#ifndef _READER_H
+#define _READER_H
 
-#include <glib.h>
-#include <glib-object.h>
+#include <string.h>
 
 #include "types.h"
+#include "gc.h"
 
 typedef struct {
-    GArray *array;
-    int position;
+	char **tokens;
+	unsigned position;
 } Reader;
 
-Reader *reader_new();
-int reader_append(Reader *reader, char* token);
-char *reader_peek(Reader *reader);
-char *reader_next(Reader *reader);
-void reader_free(Reader *reader);
+// char **tokenize(char* in);
+// char *peek(Reader *);
+// char *next(Reader *);
 
-char *_readline (char prompt[]);
-MalVal *read_str ();
+MalValue *read_str(char* in, GcRoot *env);
+
 
 #endif

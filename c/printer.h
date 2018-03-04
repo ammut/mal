@@ -3,6 +3,6 @@
 
 #include "types.h"
 
-void print_str(MalValue *ast);
+void print_str(obj ast);
 
 #endif

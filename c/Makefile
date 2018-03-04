@@ -1,13 +1,13 @@
-CFLAGS += -g -Wall -Wextra -Werror -pedantic 
+CFLAGS += -g -Wall -Wextra -Werror -pedantic
 LDFLAGS += -g
 
 #####################
 
 
-SOURCES_BASE = reader.c printer.c types.c gc.c
+SOURCES_BASE = reader.c printer.c env.c core.c math.c types.c
 SOURCES_LISP = #env.c core.h core.c stepA_mal.c
 SOURCES = $(SOURCES_BASE) $(SOURCES_LISP)
-HEADERS = $(SOURCES:%.c=%.h);
+HEADERS = $(SOURCES:%.c=%.h) env.h;
 
 OBJECTS = $(SOURCES:%.c=%.o)
 

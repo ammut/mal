@@ -4,18 +4,12 @@
 #include <string.h>
 
 #include "types.h"
-#include "gc.h"
 
-typedef struct {
+typedef struct reader {
 	char **tokens;
 	unsigned position;
-} Reader;
+} reader_s;
 
-// char **tokenize(char* in);
-// char *peek(Reader *);
-// char *next(Reader *);
-
-MalValue *read_str(char* in, GcRoot *env);
-
+obj read_str(char* in);
 
 #endif

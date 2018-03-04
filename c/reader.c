@@ -5,90 +5,99 @@
 
 #include "reader.h"
 #include "types.h"
-#include "gc.h"
 
-static size_t whitespace(char*);
-static size_t rose(char*);
-static size_t special(char*);
-static size_t string(char*);
-static size_t comment(char*);
-static size_t other(char*);
+static obj read_form(reader_s*);
+static obj read_list(reader_s*);
+static obj read_atom(reader_s*);
 
 static char **tokenize(char*);
 
-static MalValue *read_form(Reader*, GcRoot*);
-static MalValue *read_list(Reader*, GcRoot*);
-static MalValue *read_atom(Reader*);
+static size_t get_token_type(char *in);
+static size_t skip_whitespace(char *in);
+static size_t tokenize_next(char* in, int *err);
 
-static char* peek(Reader *reader) {
+enum token_type {
+	rose_token, special_token, string_token,
+	comment_token, number_token, other_token
+};
+
+static char* peek(reader_s *reader)
+{
 	return reader->tokens[reader->position];
 }
 
-static char* next(Reader *reader) {
+static char* next(reader_s *reader)
+{
 	return reader->tokens[reader->position++];
 }
 
-MalValue *read_str(char *in, GcRoot *env) {
+obj read_str(char *in)
+{
 	char **tokens = tokenize(in);
 	if (tokens == NULL) return (void *) tokens; // todo
-	Reader r = { .tokens = tokens, .position = 0 };
-	gc_pause(env);
-	MalValue *v = read_form(&r, env);
+	reader_s r = { .tokens = tokens, .position = 0 };
+	obj v = read_form(&r);
 	free (*tokens); free(tokens);
-	gc_resume(env);
 	return v;
 }
 
-static MalValue *read_form(Reader *r, GcRoot *gc) {
-	MalValue *v;
-	if ('(' == peek(r)[0]) v = read_list(r, gc);
+static obj read_form(reader_s *r)
+{
+	obj v;
+	if ('(' == peek(r)[0]) v = read_list(r);
 	else v = read_atom(r);
 	if (NULL == v) return v;
-	gc_set_root(v, gc);
 	return v;
 }
 
-static MalValue *read_list(Reader *r, GcRoot *gc) {
+static obj read_list(reader_s *r)
+{
 	(void)next(r);
-	if (peek(r)[0] == ')') return &empty_list;
-	MalValue *initial = read_form(r, gc);
-	MalValue *head = mal_list_from(initial);
-	if (NULL == head || NULL == initial) goto read_list_err;
+	if (peek(r)[0] == ')') return empty_list;
+
+	obj head = NULL;
+	obj tail = head;
+	unsigned count = 0;
+
 	while (peek(r) && peek(r)[0] != ')') { // read_form$read_atom will call next(r)
-		MalValue *e_l = read_form(r, gc);
-		if (!e_l) goto read_list_err;
-		e_l = add_last_mutating(head, e_l);
-		if (!e_l) goto read_list_err;
-		gc_set_root(e_l, gc);
+		obj el = read_form(r);
+		if (!el) goto read_list_err;
+		tail = append_mutating(tail, el);
+		++count;
+		if (!tail) goto read_list_err;
+		if (!head) head = tail;
 	}
-	if (NULL == next(r)) goto read_list_err; 
+	if (NULL == next(r)) goto read_list_err;
+	set_length_mutating(head, count);
 	return head;
 
  read_list_err:
-	if (head != NULL) destroy_mal_value(head);
 	return NULL;
 }
 
-static MalValue *read_atom(Reader *r) {
+static obj read_atom(reader_s *r)
+{
 	char *token = next(r);
 	size_t len = strlen(token);
-	MalNumber num;
 
 	// todo: rebuild the lexer
 
-	num = parse_number(token);
-	if (num.type != NONE) return mal_number_from(token);
-	if (rose(token)) return NULL;
-	if (special(token)) return NULL;
-	if (string(token)) {
-		return mal_string_from(token, len);
-	}
-	if (comment(token)) return NULL;
-	if (other(token)) {
-		if (strcmp(token, "true") == 0) return &mal_true;
-		if (strcmp(token, "false") == 0) return &mal_false;
-		if (strcmp(token, "nil") == 0) return &mal_nil;
-		return mal_symbol(token, len);
+	switch (get_token_type(token)) {
+		case rose_token:
+			return NULL;
+		case special_token:
+			return NULL;
+		case string_token:
+			return read_string(token, len);
+		case comment_token:
+			return NULL;
+		case number_token:
+			return read_number(token);
+		case other_token:
+			if (strcmp(token, "true") == 0) return true_o;
+			if (strcmp(token, "false") == 0) return false_o;
+			if (strcmp(token, "nil") == 0) return nil_o;
+			return new_symbol(token, len);
 	}
 	return NULL;
 }
@@ -102,7 +111,8 @@ static MalValue *read_atom(Reader *r) {
  * ...
  * free(*tokens); free(tokens);
  */
-static char **tokenize(char* in) {
+static char **tokenize(char* in)
+{
 	size_t in_len = strlen(in);
 
 	size_t buff_pos = 0;
@@ -117,37 +127,43 @@ static char **tokenize(char* in) {
 
 	size_t in_pos = 0;
 	size_t found = 0;
+	int err;
 
 	while(1) {
-		in_pos += whitespace(in + in_pos);
-		if (in_pos == in_len) break; 
-		found = rose(in + in_pos);
-		if (!found) found = special(in + in_pos);
-		if (!found) found = string(in + in_pos);
-		if (!found) found = comment(in + in_pos);
-		if (!found) found = other(in + in_pos); // this *should* match the rest
+		in_pos += skip_whitespace(in + in_pos);
+		if (in_pos == in_len) break; // EOI
+		found = tokenize_next(in + in_pos, &err);
 		assert(found);
-		
+
 		tokens[tokens_pos++] = token_buff + buff_pos;
 		while(found--) token_buff[buff_pos++] = in[in_pos++];
 		token_buff[buff_pos++] = '\0';
-	}		
+	}
 
 	return tokens;
 
-	tokenize_err:
+tokenize_err:
 	if (token_buff) free(token_buff);
 	if (tokens) free(tokens);
 	return NULL;
 }
 
 
-static int is_ws(char c) {
+static int is_ws(char c)
+{
 	return 9 == c || 10 == c || 11 == c || 12 == c||
 		  13 == c || ' ' == c || ',' == c;
 }
 
-static size_t whitespace(char *in) {
+static int is_other(char c)
+{
+	return !is_ws(c) && '[' != c && ']' != c && '{' != c && '}' != c &&
+		   '(' != c && ')' != c && '\'' != c && '"' != c && '`' != c &&
+		   ',' != c && ';' != c && '\0' != c;
+}
+
+static size_t skip_whitespace(char *in)
+{
 	size_t r = 0;
 	char c = in[r];
 	while(is_ws(c)) {
@@ -156,14 +172,16 @@ static size_t whitespace(char *in) {
 	return r;
 }
 
-static size_t rose(char *in) {
+#if 0
+
+static size_t tokenize_rose(char *in) {
 	if (in[0] == '~' && in[1] == '@') {
 		return 2;
 	}
 	return 0;
 }
 
-static size_t special(char *in) {
+static size_t tokenize_special(char *in) {
 	char c = in[0];
 	if ('[' == c || ']' == c || '{' == c || '}' == c || '(' == c || ')' == c ||
 		'\'' == c || '`' == c || '~' == c || '@' == c || '^' == c) {
@@ -172,7 +190,7 @@ static size_t special(char *in) {
 	return 0;
 }
 
-static size_t string(char *in) {
+static size_t tokenize_string(char *in) {
 	size_t pos = 0;
 	switch(in[pos]) {
 		case '"':
@@ -205,13 +223,13 @@ string_err:
 	return 0;
 }
 
-static size_t comment(char *in) {
+static size_t tokenize_comment(char *in) {
 	size_t pos = 0;
 	if (in[pos] == ';') while (in[++pos] != '\n' && in[pos] != '\0');
 	return pos;
 }
 
-static size_t other(char *in) {
+static size_t tokenize_other(char *in) {
 	size_t pos = 0;
 	char c = in[pos];
 	while (!is_ws(c) && '[' != c && ']' != c && '{' != c && '}' != c &&
@@ -222,8 +240,144 @@ static size_t other(char *in) {
 	return pos;
 }
 
-#if 0
-static size_t lex(char *in) {
-	return 0;
-}
 #endif
+
+static size_t tokenize_next(char* in, int *err)
+{
+	size_t pos = 0;
+	switch (in[0]) {
+		case '~':
+			if (in[1] == '@') {
+				pos = 2;
+				goto tokenize_next_exit;
+			} else if (in[1] == '\0') {
+				pos = 1;
+				goto tokenize_next_exit;
+			}
+		case '[':
+		case ']':
+		case '{':
+		case '}':
+		case '(':
+		case ')':
+		case '\'':
+		case '`':
+		case '^':
+		case '@':
+			pos = 1;
+			goto tokenize_next_exit;
+
+		case '"':
+			pos = 1;
+			goto tokenize_next_string;
+
+		case ';':
+			pos = 1;
+			goto tokenize_next_comment;
+
+		default:
+			goto tokenize_next_other;
+	}
+tokenize_next_exit:
+	return pos;
+
+tokenize_next_string:
+	switch(in[pos]) {
+		case '\0':
+			*err = 1; // todo: actual error codes
+			goto tokenize_next_exit;
+		case '"':
+			++pos;
+			goto tokenize_next_exit;
+		case '\\':
+			++pos;
+			goto tokenize_next_string_esc;
+		default:
+			++pos;
+			goto tokenize_next_string;
+	}
+tokenize_next_string_esc:
+	switch(in[pos]) {
+		case '\0':
+			*err = 1; // todo: actual error codes
+			goto tokenize_next_exit;
+		default:
+			++pos;
+			goto tokenize_next_string;
+	}
+
+tokenize_next_comment:
+	while (in[pos] != '\n' && in[pos] != '\0') ++pos;
+	goto tokenize_next_exit;
+
+tokenize_next_other:
+	{
+		int num_len;
+		malp_int_t i;
+		malp_real_t r;
+		if (sscanf(in, "%" PRId64 "%n", &i, &num_len)) {
+			if (!is_other(in[num_len])) {
+				pos = (size_t)num_len;
+				goto tokenize_next_exit;
+			}
+			int denom_len;
+			if (in[num_len] == '/' &&
+				sscanf(in , "%" PRId64 "%n", &i, &denom_len) &&
+				!is_other(in[num_len + 1 + denom_len])) {
+
+				if (i == 0) {
+					*err = 1; // todo: actual error code
+				}
+				pos = (size_t)num_len + 1 + denom_len;
+				goto tokenize_next_exit;
+			}
+		}
+		if (sscanf(in, "%lf%n", &r, &num_len)) {
+
+			pos = (size_t)num_len;
+			if (is_other(in[num_len])) {
+				*err = 1; // todo: actual error codes
+			}
+			goto tokenize_next_exit;
+		}
+	}
+	char c = in[pos];
+	while (is_other(c)) {
+		c = in[++pos];
+	}
+	goto tokenize_next_exit;
+}
+
+static size_t get_token_type(char* in)
+{
+	switch (in[0]) {
+		case '~':
+			if (in[1] == '@') {
+				return rose_token;
+			}
+		case '[':
+		case ']':
+		case '{':
+		case '}':
+		case '(':
+		case ')':
+		case '\'':
+		case '`':
+		case '^':
+		case '@':
+			return special_token;
+
+		case '"':
+			return string_token;
+
+		case ';':
+			return comment_token;
+
+		default:
+			break;
+	}
+	if ((in[0] == '-' && in[1] != 0) || (in[0] >= '0' && in[0] <= '9'))
+		return number_token;
+	return other_token;
+}
+

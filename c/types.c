@@ -5,358 +5,373 @@
 
 #include "types.h"
 
-void destroy_mal_value(MalValue *v) {
-	if (!v) return;
-	switch(v->type) {
-		case List:
-		case Number:
-		case Symbol:
-		case String:
-			free(v);
-		case Nil:
-		case True:
-		case False:
-			break; // do nothing
-		case Keyword:
-		case Vector:
-		case HashMap:
-		case Atom:
-		default:
-			break;
-	}
-}
+#ifdef MPS
+#define ALIGNMENT sizeof(mps_word_t)
+#else
+#define ALIGNMENT (sizeof(void*))
+#endif
+
+/* Align size upwards to the next multiple of the word size. */
+#define ALIGN_WORD(size) \
+  (((size) + ALIGNMENT - 1) & ~(ALIGNMENT - 1))
+
+/* Align size upwards to the next multiple of the word size, and
+ * additionally ensure that it's big enough to store a forwarding
+ * pointer. Evaluates its argument twice. */
+#define ALIGN_OBJ(size)                                \
+  (ALIGN_WORD(size) >= ALIGN_WORD(sizeof(malp_fwd))       \
+   ? ALIGN_WORD(size)                                  \
+   : ALIGN_WORD(sizeof(malp_fwd)))
+
 
 // LIST
 
-MalValue *mal_list() {
-	MalValue *r;
-	size_t r_size = (sizeof *r + sizeof(MalList) + 3) / 4 * 4;
-	r = malloc(r_size);
+obj empty_list = (obj)&(malp_list){
+	.type = List,
+	.count = 0,
+	.first = NULL,
+	.rest = NULL,
+};
+
+obj cons(obj list, obj el)
+{
+	obj r = new_list();
+	r->list.count = list->list.count + 1;
+	r->list.first = el;
+	r->list.rest = list;
+	return r;
+}
+
+obj new_list()
+{
+	obj r = malloc(ALIGN_OBJ(sizeof(malp_list)));
 	if (r == NULL) return r;
 	r->type = List;
-	r->gc_mark = 0;
-	((MalList*)r->value)->first = NULL;
-	((MalList*)r->value)->count = 0;
+	r->list.first = NULL;
+	r->list.rest = empty_list;
+	r->list.count = 0;
 	return r;
 }
 
-MalValue *mal_list_from(MalValue *el) {
-	MalValue *r = mal_list();
-	MalList *list = (MalList*)r->value;
-	list->first = el;
-	list->count = 1;
-	list->rest = NULL;
-	return r;
-}
-
-MalValue *add_last_mutating(MalValue *h, MalValue *el) {
-	MalValue *new = mal_list();
-	if (!new) return NULL;
-	MalList *l = (MalList*)h->value;
-	while (l->rest) {
-		++l->count;
-		l = (MalList*)l->rest->value;
+obj append_mutating(obj l, obj el)
+{
+	obj tail = new_list();
+	if (!tail) return tail;
+	if (NULL == l) l = tail;
+	while (l->list.rest != empty_list) {
+		l = l->list.rest;
 	}
-	l->rest = new;
-	l = (MalList*)new->value;
-	l->first = el;
-	l->count = 1;
-	l->rest = NULL;
-	return new;
+	l->list.rest = tail;
+	tail->list.first = el;
+	tail->list.rest = empty_list;
+	return tail;
 }
 
-MalValue empty_list = {
-	.type = List,
-};
+void set_length_mutating(obj l, size_t c)
+{
+	while (c ) {
+		l->list.count = c--;
+		l = l->list.rest;
+	}
+}
 
 // NUMBER
 
-MalNumber parse_number(char *token) {
-	MalIntValue intval;
-	MalFloatValue floatval;
-	int success;
-	MalNumber r = { .value.INT = 0, .type = NONE };
-	
-	success = sscanf(token, "%" PRId64, &intval) +
-		(sscanf(token, "%lf", &floatval) << 1);
-	switch (success) {
-		case 3:
-			if (intval == floatval) goto parse_number_int;
-		case 2:
-			r.type = FLOAT;
-			r.value.FLOAT = floatval;
+static obj new_number(size_t size)
+{
+	obj r = malloc(size);
+	if (r == NULL) return r;
+	return r;
+}
+
+obj read_number(char *token)
+{
+	obj r = NULL;
+	int scans = 0;
+	malp_int_t int_val;
+	malp_real_t float_val;
+
+	scans =
+		sscanf(token, "%" PRId64, &int_val) |
+		(sscanf(token, "%lf", &float_val) << 1);
+	switch (scans) {
+		case 0x3: {
+			if (int_val == float_val) goto parse_number_int;
+		}
+		case 0x2: {
+			r = new_real(float_val);
 			break;
-		case 1:
-		parse_number_int:
-			r.type = INT;
-			r.value.INT = intval;
-		default:
+		}
+		case 0x1:
+		parse_number_int: {
+			char *slash;
+			if ((slash = strchr(token, '/')) == NULL) {
+				r = new_int(int_val);
+
+			// slash found -> tokenizer guarantees success
+			} else {
+				malp_denom_t denominator;
+				scans = sscanf(++slash, "%" PRIu64, &denominator);
+				if (scans) {
+					r = new_ratio(int_val, denominator);
+				}
+			}
+		}
+		default: {
 			break;
+		}
 	}
 	return r;
 }
 
-static MalValue *mal_number() {
-	MalValue *r;
-	size_t r_size = sizeof *r + sizeof(MalNumber);
-	r_size = (r_size + 3) / 4 * 4;
-	r = malloc(r_size);
+obj new_int(malp_int_t value)
+{
+	obj r = new_number(ALIGN_OBJ(sizeof(malp_int)));
 	if (r == NULL) return r;
-	r->type = Number;
-	r->gc_mark = 0;
+	r->integer = (malp_int){
+		.type = Int,
+		.value = value,
+	};
 	return r;
 }
 
-MalValue *mal_number_int(MalIntValue value) {
-	MalValue *r = mal_number();
+obj new_real(malp_real_t value)
+{
+	obj r = new_number(ALIGN_OBJ(sizeof(malp_real)));
 	if (r == NULL) return r;
-	*(MalNumber*)r->value = (MalNumber){ .value.INT = value, .type = INT };
+	r->real = (malp_real){
+		.type = Real,
+		.value = value,
+	};
 	return r;
 }
 
-MalValue *mal_number_float(MalFloatValue value) {
-	MalValue *r = mal_number();
+obj new_ratio(malp_int_t numerator, malp_denom_t denominator)
+{
+	obj r = new_number(ALIGN_OBJ(sizeof(malp_ratio)));
 	if (r == NULL) return r;
-	*(MalNumber*)r->value = (MalNumber){ .value.FLOAT = value, .type = FLOAT };
+	r->ratio = (malp_ratio){
+		.type = Ratio,
+		.numerator = numerator,
+		.denominator = denominator,
+	};
 	return r;
 }
 
-MalValue *mal_number_from(char *token) {
-	MalNumber n = parse_number(token);
-	if (n.type == NONE) return NULL;
-	MalValue *r = mal_number();
-	if (r == NULL) return r;
-	*(MalNumber*)r->value = n;
-	return r;
+int is_number(obj o)
+{
+	return o->type == Real || o->type == Int || o->type == Ratio;
 }
 
 // SYMBOL
 
-MalValue *mal_symbol(char *token, size_t length) {
-	MalValue *r;
-	size_t r_size = sizeof *r + length + 1;
-	r_size = (r_size + 3) / 4 * 4;
-	r = malloc(r_size);
+obj new_symbol(char *token, size_t length)
+{
+	obj r = malloc(ALIGN_OBJ(sizeof(malp_symbol) + length + 1));
 	if (r == NULL) return r;
 	r->type = Symbol;
-	r->gc_mark = 0;
-	strcpy((MalSymbol)r->value, token);
+	strcpy(r->symbol.name, token);
 	return r;
 }
 
 // NIL
 
-MalValue mal_nil = { .type = Nil };
+obj nil_o = &(obj_s){
+	.type = Nil
+};
 
-int is_nil(MalValue *other) {
-	return other == &mal_nil;
+int is_nil(obj obj)
+{
+	return obj == nil_o;
 }
 
 // TRUE
 
-MalValue mal_true = { .type = True };
+obj true_o = &(obj_s){
+	.type = True
+};
 
-int is_true(MalValue *other) {
-	return other == &mal_true;
+int is_true(obj obj)
+{
+	return obj == true_o;
 }
 
-int truthy(MalValue *other) {
-	return !is_false(other) && !is_nil(other);
+int is_truthy(obj obj)
+{
+	return !is_falsey(obj);
 }
 
 // FALSE
 
-MalValue mal_false = { .type = False };
+obj false_o = &(obj_s){
+	.type = False
+};
 
-int is_false(MalValue *other) {
-	return other == &mal_false;
+int is_false(obj obj)
+{
+	return obj == false_o;
 }
 
-int falsey(MalValue *other) {
-	return is_false(other) || is_nil(other);
+int is_falsey(obj obj)
+{
+	return is_false(obj) || is_nil(obj);
 }
 
 // STRING
 
-MalValue *mal_string(char *value, size_t len) {
-	MalValue *r;
-	size_t r_size = sizeof *r + sizeof(MalString) + len;
-	r_size = (r_size + 3) / 4 * 4;
-	r = malloc(r_size);
+obj new_string(char *value, size_t len)
+{
+	obj r  = malloc(ALIGN_OBJ(sizeof(malp_string) + len));
 	if (r == NULL) return r;
 	r->type = String;
-	r->gc_mark = 0;
-	memcpy(((MalString*)r->value)->string, value, len);
-	((MalString*)r->value)->length = len;
+	r->string.length = len;
+	memcpy(r->string.value, value, len);
 	return r;
 }
 
-static size_t unescape_mal_string(char *buf, char *value, size_t len, int *err);
+static size_t decode_malp_string(char *buffer, char *token, size_t len, int *err);
 
-MalValue *mal_string_from(char *token, size_t len) {
-	char buf[(len - 2) * 4]; // -2 quotes, x4 unicode
+obj read_string(char *token, size_t len)
+{
+	char buf[ALIGN_WORD(len + 1)]; // -2 quotes, +3 branchless utf8_decode
 	int err;
-	len = unescape_mal_string(buf, token + 1, len - 2, &err);
+	len = decode_malp_string(buf, token + 1, len - 2, &err);
 	if (err) return NULL;
-	return mal_string(buf, len);
+	return new_string(buf, len);
 }
 
-static int unescape_hex(char **buffer, char **token, int *err);
-static int unescape_unicode(char **buffer, char **token, int *err);
-static int unescape_octal(char **buffer, char **token, int *err);
-static int16_t hex2i(char);
+static int decode_hex(char **buffer, char **token, int *err);
+static int decode_octal(char **buffer, char **token, int *err);
+static int decode_unicode(char **buffer, char **token, int *err);
+
 /*
  * we escape: \", \\, \b, \f, \n, \r, \t, \ooo, \xXX, \uXXXX, \UXXXXXXXX
  */
-static size_t unescape_mal_string(char *buffer, char *token, size_t len, int *err) {
+static size_t decode_malp_string(char *buffer, char *token, size_t len,
+								 int *err)
+{
 	char *end = token + len;
 	char *start = buffer;
 
 	while(token < end) {
-		if (*token == '\\') {
-			switch(*(++token)) {
-			case '"':
-			case '\\':
-				*buffer++ = *token; ++token; break;
-			case 'b':
-				*buffer++ = 0x08; ++token; break;
-			case 'f':
-				*buffer++ = 0x0c; ++token; break;
-			case 'n':
-				*buffer++ = 0x0a; ++token; break;
-			case 'r':
-				*buffer++ = 0x0d; ++token; break;
-			case 't':
-				*buffer++ = 0x09; ++token; break;
-			case 'v':
-				*buffer++ = 0x0b; ++token; break;
-			case 'x':
-				unescape_hex(&buffer, &token, err); break;
-			case 'u':
-			case 'U':
-				unescape_unicode(&buffer, &token, err); break;
-			default:
-				if (*token >= '0' && *token < '8') {
-					unescape_octal(&buffer, &token, err);
-				} else {
-					*err = 1;
-					return buffer - start;
-				}
-			}
+		if (*token != '\\') {
+			*buffer++ = *token++;
 
 		} else {
-			*buffer++ = *token++;
+			switch(*(++token)) {
+				case '"':
+				case '\\': *buffer++ = *token; ++token; break;
+				case 'b': *buffer++ = 0x08; ++token; break;
+				case 'f': *buffer++ = 0x0c; ++token; break;
+				case 'n': *buffer++ = 0x0a; ++token; break;
+				case 'r': *buffer++ = 0x0d; ++token; break;
+				case 't': *buffer++ = 0x09; ++token; break;
+				case 'v': *buffer++ = 0x0b; ++token; break;
+				case 'x': decode_hex(&buffer, &token, err); break;
+				case 'u':
+				case 'U': decode_unicode(&buffer, &token, err); break;
+				default:
+					if (*token >= '0' && *token < '8') {
+						decode_octal(&buffer, &token, err);
+					} else {
+						*err = 1;
+						return buffer - start;
+					}
+			}
 		}
 	}
 
 	return buffer - start;
 }
 
+static int hex2i(char c)
+{
+	int b = (uint8_t)c;
+	int maskLetter = (('9' - b) >> 31);
+	int maskSmall = (('Z' - b) >> 31);
+	int offset = '0' + (maskLetter & ((int)('A' - '0' - 10))) + (maskSmall & ((int)('a' - 'A')));
+	return b - offset;
+}
 
-static int unescape_hex(char **_buffer, char **_token, int *err) {
-	char a, b;
-	char *buffer = *_buffer, *token = *_token;
-	if (-1 == (a = hex2i(*token++))) {
-		*err = 1;
-		return 0;
-	}
-
-	if (-1 != (b = hex2i(*token++))) { // x++ > *x
-		a = (a << 4u) + b;
-	}
-	*buffer++ = a;
-
-	while (-1 != b && -1 != (a = hex2i(*token++))) {
-		if (-1 != (b = hex2i(*token++))) {
-			a = (a << 4u) + b;
-		}
-		*buffer++ = a;
-	}
-	*_buffer = buffer;
-	*_token = token;
+static int decode_hex(char **buffer, char **token, int *err)
+{
+	char *_token = *token, *_buffer = *buffer;
+	*_buffer = (char)((hex2i(*_token) << 4u) | hex2i(*(_token + 1)));
+	*buffer = _buffer;
+	*token = _token;
+	*err = 0;
 	return 1;
 }
 
-static int unescape_unicode(char **_buffer, char **_token, int *err) {
+static int decode_octal(char **buffer, char **token, int *err)
+{
+	char *_buffer = *buffer, *_token = *token;
+	*_buffer = *_token++ - '0';
+	if (*_token >= '0' && *_token < '8') {
+		*_buffer += *_token++ - '0';
+		if (*_token >= '0' && *_token < '8') {
+			*_buffer += *_token++ - '0';
+		}
+	}
+	*buffer = _buffer + 1;
+	*token = _token;
+	*err = 0;
+	return 1;
+}
+
+static int decode_unicode(char **buffer, char **token, int *err)
+{
 	int16_t a, b, c, d;
 	int32_t code;
-	char *buffer = *_buffer, *token = *_token;
-	if (-1 != (a = hex2i(*(token + 1))) &&
-		-1 != (b = hex2i(*(token + 2))) &&
-		-1 != (c = hex2i(*(token + 3)))	&&
-		-1 != (d = hex2i(*(token + 4)))) {
-		
+	char *_buffer = *buffer, *_token = *token;
+	if (-1 != (a = hex2i(_token[1])) &&
+		-1 != (b = hex2i(_token[2])) &&
+		-1 != (c = hex2i(_token[3]))	&&
+		-1 != (d = hex2i(_token[4]))) {
+
 		code = d + (c << 4u) + (b << 8u) + (a << 12u);
-		
-		if ('U' == *token) {
-			if (-1 != (a = hex2i(*(token + 5))) &&
-				-1 != (b = hex2i(*(token + 6))) &&
-				-1 != (c = hex2i(*(token + 7))) &&
-				-1 != (d = hex2i(*(token + 8)))) {
+
+		if ('U' == *_token) {
+			if (-1 != (a = hex2i(_token[5])) &&
+				-1 != (b = hex2i(_token[6])) &&
+				-1 != (c = hex2i(_token[7])) &&
+				-1 != (d = hex2i(_token[8]))) {
 				code = d + (c << 4u) + (b << 8u) + (a << 12u) + (code << 16u);
-				token += 4;
+				_token += 4;
 			} else {
-				goto unescape_unicode_err;
+				goto decode_unicode_err;
 			}
 		}
 
-		token += 5;
+		if ((code >= 0x800 && code - 0xd800u < 0x800) ||
+			(code >= 0x110000)) goto decode_unicode_err;
+
+		_token += 5;
+		*token = _token;
 
 		if (code < 0x80) {
-			*buffer++ = code;
+			*_buffer++ = code;
 		} else if (code < 0x800) {
-			*buffer++ = 192 + code / 64;
-			*buffer++ = 128 + code % 64;
-		} else if (code - 0xd800u < 0x800) {
-			goto unescape_unicode_err;
+			*_buffer++ = 192 + code / 64;
+			*_buffer++ = 128 + code % 64;
 		} else if (code < 0x10000) {
-			*buffer++ = 224 + code / 4096;
-			*buffer++ = 128 + code / 64 % 64;
-			*buffer++ = 128 + code % 64;
+			*_buffer++ = 224 + code / 4096;
+			*_buffer++ = 128 + code / 64 % 64;
+			*_buffer++ = 128 + code % 64;
 		} else if (code < 0x110000) {
-			*buffer++ = 240 + code / 262144;
-			*buffer++ = 128 + code / 4096 % 64;
-			*buffer++ = 128 + code / 64 % 64;
-			*buffer++ = 128 + code % 64;
-		} else {
-			goto unescape_unicode_err;
+			*_buffer++ = 240 + code / 262144;
+			*_buffer++ = 128 + code / 4096 % 64;
+			*_buffer++ = 128 + code / 64 % 64;
+			*_buffer++ = 128 + code % 64;
 		}
-		*_buffer = buffer;
-		*_token = token;
+		*buffer = _buffer;
 		return 1;
 	} else {
-		unescape_unicode_err:
+		decode_unicode_err:
 		*err = 1;
 		return 0;
 	}
 
-}
-
-static int unescape_octal(char **_buffer, char **_token, int *err) {
-	char *buffer = *_buffer, *token = *_token;
-	if (*token >= '0' && *token < '8') {
-		*buffer = *token++ - '0';
-		if (*token >= '0' && *token < '8') {
-			*buffer += *token++ - '0';
-			if (*token >= '0' && *token < '8') {
-				*buffer += *token++ - '0';
-			}
-		}
-		*_buffer = buffer;
-		*_token = token;
-		return 1;
-	} else {
-	    *err = 1;
-		return 0;
-	}
-}
-
-static int16_t hex2i(char c) {
-	return c >= '0' && c <= '9' ?
-		c - '0' :
-		(c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f') ?
-		(c & ~0x20) - 'A' + 10 :
-		-1;
 }
 
 

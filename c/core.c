@@ -2,23 +2,28 @@
 
 #include "types.h"
 #include "math.h"
+#include "env.h"
 #include "core.h"
 
-malp_symtab *builtins = (malp_symtab*)(malp_symtab[20]) { 0 };
+#define STRLEN_STATIC(s) (sizeof(s) - 1)
 
-void init_builtins()
+#define BUILTINS_SIZE 20
+
+obj init_repl_env()
 {
-	builtins[0] = (malp_symtab){ "+", PLUS };
-	builtins[1] = (malp_symtab){ "-", MINUS };
-	builtins[2] = (malp_symtab){ "*", STAR };
-	builtins[3] = (malp_symtab){ "/", SLASH };
-	builtins[4] = (malp_symtab){ "number?", numberQUESTION };
+	obj env = new_env(BUILTINS_SIZE, NULL); // todo: malloc checking
+	env_set(env, new_symbol("+", STRLEN_STATIC("+")), PLUS);
+	env_set(env, new_symbol("-", STRLEN_STATIC("-")), MINUS);
+	env_set(env, new_symbol("*", STRLEN_STATIC("*")), STAR);
+	env_set(env, new_symbol("/", STRLEN_STATIC("/")), SLASH);
+	env_set(env, new_symbol("number?", STRLEN_STATIC("number?")), numberQUESTION);
+	return env;
 }
 
 DEF_BUILTIN_FN(numberQUESTION)(obj args, int *err)
 {
 	if (args->list.rest == empty_list) {
-		*err = 1; // todo
+		*err = ArityError; // todo
 		return NULL;
 	}
 	args = args->list.first;
@@ -39,7 +44,7 @@ DEF_BUILTIN_FN(PLUS)(obj args, int *err)
 	while (args != empty_list) {
 		arg = args->list.first;
 		if (!is_number(arg)) {
-			*err = 1; // todo
+			*err = InvalidArgumentError; // todo
 			return NULL;
 		}
 		add_mutating(res, arg);
@@ -61,7 +66,7 @@ DEF_BUILTIN_FN(PLUS)(obj args, int *err)
 DEF_BUILTIN_FN(MINUS)(obj args, int *err)
 {
 	if (args == empty_list) {
-		*err = 1; // todo
+		*err = ArityError; // todo
 		return NULL;
 	}
 
@@ -75,7 +80,7 @@ DEF_BUILTIN_FN(MINUS)(obj args, int *err)
 
 	if (args->list.count > 1) {
 		if (!is_number(args->list.first)) {
-			*err = 1; // todo
+			*err = InvalidArgumentError; // todo
 			return NULL;
 		}
 		tmp = *(malp_number*)args->list.first;
@@ -85,7 +90,7 @@ DEF_BUILTIN_FN(MINUS)(obj args, int *err)
 	while (args != empty_list) {
 		arg = args->list.first;
 		if (!is_number(arg)) {
-			*err = 1; // todo
+			*err = InvalidArgumentError; // todo
 			return NULL;
 		}
 		subtract_mutating(res, arg);
@@ -116,7 +121,7 @@ DEF_BUILTIN_FN(STAR)(obj args, int *err)
 	while (args != empty_list) {
 		arg = args->list.first;
 		if (!is_number(arg)) {
-			*err = 1; // todo
+			*err = InvalidArgumentError; // todo
 			return NULL;
 		}
 		multiply_mutating(res, arg);
@@ -138,7 +143,7 @@ DEF_BUILTIN_FN(STAR)(obj args, int *err)
 DEF_BUILTIN_FN(SLASH)(obj args, int *err)
 {
 	if (args == empty_list) {
-		*err = 1; // todo
+		*err = ArityError; // todo
 		return NULL;
 	}
 
@@ -152,7 +157,7 @@ DEF_BUILTIN_FN(SLASH)(obj args, int *err)
 
 	if (args->list.count > 1) {
 		if (!is_number(args->list.first)) {
-			*err = 1; // todo
+			*err = InvalidArgumentError; // todo
 			return NULL;
 		}
 		tmp = *(malp_number*)args->list.first;
@@ -162,7 +167,7 @@ DEF_BUILTIN_FN(SLASH)(obj args, int *err)
 	while (args != empty_list) {
 		arg = args->list.first;
 		if (!is_number(arg)) {
-			*err = 1; // todo
+			*err = InvalidArgumentError; // todo
 			return NULL;
 		}
 		divide_mutating(res, arg);

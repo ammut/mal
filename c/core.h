@@ -13,9 +13,15 @@ obj name = (obj)&(malp_fn){ \
 }; \
 static obj name##_
 
-malp_symtab *builtins;
+enum errors {
+	ArityError = 1,
+	InvalidArgumentError,
+	ReaderError,
+	SymbolNotFoundError,
+	NotCallableError
+};
 
-void init_builtins();
+obj init_repl_env();
 
 obj numberQUESTION;
 

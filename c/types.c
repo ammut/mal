@@ -374,4 +374,16 @@ static int decode_unicode(char **buffer, char **token, int *err)
 
 }
 
+// ENV
+
+obj new_env(unsigned size, obj outer)
+{
+	obj r = malloc(ALIGN_OBJ(sizeof(malp_env)));
+	if (r == NULL) return r;
+	r->type = Env;
+	r->env.data_size = size;
+	r->env.data = calloc(size, sizeof(malp_symtab_elem));
+	r->env.outer = outer;
+	return r;
+}
 

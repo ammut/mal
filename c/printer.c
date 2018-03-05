@@ -54,6 +54,7 @@ void print_str(obj ast)
 		default:
 			break;
 	}
+	putchar('\n');
 }
 
 static void pr_string(char *value, size_t len)

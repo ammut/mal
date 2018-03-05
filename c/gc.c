@@ -26,8 +26,8 @@ static void markSingle(MalValue *object) {
 	case List: {
 		do {
 			object->gc_mark = 1;
-			markSingle(((MalList*)object->value)->first);
-		} while ((object = ((MalList*)object->value)->rest));
+			markSingle(((malp_list*)object->value)->first);
+		} while ((object = ((malp_list*)object->value)->rest));
 		break;
 	}
 	case Number:
@@ -42,7 +42,7 @@ static void markSingle(MalValue *object) {
 	default:
 		assert(!"not implemented yet");
 		break;
-	}	
+	}
 }
 
 static void mark(GcRoot *gc) {
@@ -107,8 +107,8 @@ static void gc_run_async(void *env) {
 
 void gc_async_init(Env *env) {
 	pthread_create(env->gc_thread, NULL, gc_run, env);
-		
-	while (env); 
+
+	while (env);
 }
 
 void gc_wake(Env *env) {}

@@ -4,8 +4,11 @@
 #include <stdlib.h>
 
 #include "types.h"
-#include "core.h"
 
-obj get_symbol(obj env, char *name);
+void env_set(obj env, obj symbol, obj value);
+
+obj env_find(obj env, obj symbol);
+
+obj env_get(obj env, obj symbol);
 
 #endif

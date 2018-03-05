@@ -19,7 +19,7 @@ obj eval_ast(obj ast, obj env, int *err)
 {
 	switch (ast->type) {
 		case Symbol: {
-			obj value = get_symbol(env, ast->symbol.name);
+			obj value = env_get(env, ast->symbol.name);
 			if (NULL == value) *err = 1; // todo
 			return value;
 		}
@@ -79,7 +79,7 @@ int main() {
 
 	obj env = (obj)&(malp_env){
 		.type = Env,
-		.symtab = builtins,
+		.data = builtins,
 	};
 	int err;
 

@@ -20,6 +20,7 @@ enum malp_type {
 	String,
 	Fn,
 	Env,
+	Error,
 	Keyword,
 	Vector,
 	HashMap,
@@ -52,6 +53,9 @@ obj new_list();
 obj append_mutating(obj list, obj element);
 
 void set_length_mutating(obj list, size_t count);
+
+#define LIST_FIRST(l) ((l)->list.first)
+#define LIST_SECOND(l) ((l)->list.rest->list.first)
 
 // NUMBER
 
@@ -105,6 +109,8 @@ typedef struct malp_symbol {
 
 obj new_symbol(char *token, size_t length);
 
+#define SYMBOL_IS(sym, str) (0 == strcmp(sym->symbol.name, str))
+
 // NIL
 
 typedef int malp_nil;
@@ -157,19 +163,31 @@ typedef struct malp_fn {
 // ENV
 
 typedef struct malp_symtab {
-	char *name;
+	obj symbol;
 	obj value;
-} malp_symtab;
+} malp_symtab_elem;
 
 typedef struct malp_env {
 	malp_type type;
-	malp_symtab *symtab;
+	unsigned data_size;
+	malp_symtab_elem *data;
+	obj outer;
 #if 0
 	pthread_t *gc_thread;
 	pthread_cont_t *wakey_wakey;
 	pthread_mutex_t *lock;
 #endif
 } malp_env;
+
+obj new_env(unsigned size, obj outer);
+
+// ERROR
+
+typedef struct malp_error {
+	malp_type type;
+	int error_type;
+	char *message;
+} malp_error;
 
 // OBJECT
 
@@ -191,6 +209,7 @@ typedef union obj_s {
 	malp_string string;
 	malp_fn fn;
 	malp_env env;
+	malp_error error;
 	malp_fwd forward;
 } obj_s;
 

@@ -7,6 +7,7 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -g -lreadline -lpthread")
 
 set(SOURCES
         reader.h reader.c
+        readline.h readline.c
         printer.h printer.c
         env.h env.c
         core.h core.c

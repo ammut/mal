@@ -5,6 +5,7 @@
 
 #include "reader.h"
 #include "types.h"
+#include "core.h"
 
 static obj read_form(reader_s*);
 static obj read_list(reader_s*);
@@ -34,7 +35,7 @@ static char* next(reader_s *reader)
 obj read_str(char *in)
 {
 	char **tokens = tokenize(in);
-	if (tokens == NULL) return (void *) tokens; // todo
+	if (tokens == NULL) return (void *) tokens; // todo: crash horribly
 	reader_s r = { .tokens = tokens, .position = 0 };
 	obj v = read_form(&r);
 	free (*tokens); free(tokens);
@@ -284,7 +285,7 @@ tokenize_next_exit:
 tokenize_next_string:
 	switch(in[pos]) {
 		case '\0':
-			*err = 1; // todo: actual error codes
+			*err = ReaderError; // todo: actual error codes
 			goto tokenize_next_exit;
 		case '"':
 			++pos;
@@ -299,7 +300,7 @@ tokenize_next_string:
 tokenize_next_string_esc:
 	switch(in[pos]) {
 		case '\0':
-			*err = 1; // todo: actual error codes
+			*err = ReaderError; // todo: actual error codes
 			goto tokenize_next_exit;
 		default:
 			++pos;
@@ -326,7 +327,7 @@ tokenize_next_other:
 				!is_other(in[num_len + 1 + denom_len])) {
 
 				if (i == 0) {
-					*err = 1; // todo: actual error code
+					*err = ReaderError; // todo: actual error code
 				}
 				pos = (size_t)num_len + 1 + denom_len;
 				goto tokenize_next_exit;
@@ -336,7 +337,7 @@ tokenize_next_other:
 
 			pos = (size_t)num_len;
 			if (is_other(in[num_len])) {
-				*err = 1; // todo: actual error codes
+				*err = ReaderError; // todo: actual error codes
 			}
 			goto tokenize_next_exit;
 		}

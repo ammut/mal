@@ -261,7 +261,7 @@ static size_t decode_malp_string(char *buffer, char *token, size_t len, int *err
 obj read_string(char *token, size_t len)
 {
 	char buf[ALIGN_WORD(len + 1)]; // -2 quotes, +3 branchless utf8_decode
-	int err;
+	int err = 0;
 	len = decode_malp_string(buf, token + 1, len - 2, &err);
 	if (err) return NULL;
 	return new_string(buf, len);

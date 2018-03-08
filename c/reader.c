@@ -219,15 +219,15 @@ static obj read_macro_deref(reader_s *r)
 static char **tokenize(char* in)
 {
 	size_t in_len = strlen(in);
-
 	size_t buff_pos = 0;
+	char **tokens = NULL;
 	// 2x len for 0-terminated strings
 	char *token_buff = malloc(in_len * 2 * sizeof *token_buff);
 	if (NULL == token_buff) goto tokenize_err;
 
 	size_t tokens_pos = 0;
 	// len + 1 for 0-terminator
-	char **tokens = calloc(in_len + 1, sizeof *tokens);
+	tokens = calloc(in_len + 1, sizeof *tokens);
 	if (NULL == tokens) goto tokenize_err;
 
 	size_t in_pos = 0;
@@ -255,7 +255,7 @@ static char **tokenize(char* in)
 
 tokenize_err:
 	if (token_buff) free(token_buff);
-	if (tokens) free(tokens);
+	if (NULL != tokens) free(tokens);
 	return NULL;
 }
 

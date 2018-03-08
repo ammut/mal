@@ -4,6 +4,7 @@
 #include <inttypes.h>
 
 #include "types.h"
+#include "math.h"
 
 #ifdef MPS
 #define ALIGNMENT sizeof(mps_word_t)
@@ -26,7 +27,7 @@
 
 // LIST
 
-obj empty_list = (obj)&(malp_list){
+const obj const empty_list = (obj)&(const malp_list){
 	.type = List,
 	.count = 0,
 	.first = NULL,
@@ -155,6 +156,7 @@ obj new_ratio(malp_int_t numerator, malp_denom_t denominator)
 		.numerator = numerator,
 		.denominator = denominator,
 	};
+	NORMALIZE_RATIO(r->ratio);
 	return r;
 }
 
@@ -170,6 +172,17 @@ obj new_symbol(char *token, size_t length)
 	obj r = malloc(ALIGN_OBJ(sizeof(malp_symbol) + length + 1));
 	if (r == NULL) return r;
 	r->type = Symbol;
+	strcpy(r->symbol.name, token);
+	return r;
+}
+
+// KEYWORD
+
+obj new_keyword(char *token, size_t length)
+{
+	obj r = malloc(ALIGN_OBJ(sizeof(malp_symbol) + length + 1));
+	if (r == NULL) return r;
+	r->type = Keyword;
 	strcpy(r->symbol.name, token);
 	return r;
 }
@@ -218,6 +231,20 @@ int is_falsey(obj obj)
 }
 
 // STRING
+
+obj empty_string = (obj)&(malp_string){
+	.type = String,
+	.length = 0,
+};
+
+obj new_empty_string(size_t len)
+{
+	obj r  = malloc(ALIGN_OBJ(sizeof(malp_string) + len));
+	if (r == NULL) return r;
+	r->type = String;
+	r->string.length = len;
+	return r;
+}
 
 obj new_string(char *value, size_t len)
 {
@@ -372,6 +399,19 @@ static int decode_unicode(char **buffer, char **token, int *err)
 		return 0;
 	}
 
+}
+
+// FUNCTION
+
+obj new_fn(obj ast, obj env, obj binds)
+{
+	obj r = malloc(ALIGN_OBJ(sizeof(malp_fn)));
+	if (r == NULL) return r;
+	r->type = Fn;
+	r->fn.ast = ast;
+	r->fn.env = env;
+	r->fn.binds = binds;
+	return r;
 }
 
 // ENV

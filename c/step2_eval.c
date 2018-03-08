@@ -52,7 +52,7 @@ obj EVAL(obj ast, obj env, int *err) {
 		if (*err) return NULL;
 		obj first = ast->list.first;
 		obj rest = ast->list.rest;
-		if (first->type != Fn) {
+		if (first->type != BuiltinFn) {
 			*err = 1; // todo
 			return NULL;
 		}

@@ -47,6 +47,7 @@ obj eval_ast(obj ast, obj env, int *err)
 }
 
 obj EVAL(obj ast, obj env, int *err) {
+	if (ast == NULL) return ast; // todo remove once reader is complete
 	if (ast == empty_list) {
 		return ast;
 	} else if (ast->type == List) {
@@ -85,7 +86,7 @@ obj EVAL(obj ast, obj env, int *err) {
 			obj let_env = new_env((unsigned)bindings->list.count / 2, env);
 			while (empty_list != bindings) {
 				if (LIST_FIRST(bindings)->type != Symbol) {
-					*err = 1; // todo
+					*err = InvalidArgumentError; // todo
 					return NULL;
 				}
 				env_set(let_env, LIST_FIRST(bindings), EVAL(LIST_SECOND(bindings), let_env, err));
@@ -101,7 +102,7 @@ obj EVAL(obj ast, obj env, int *err) {
 			if (*err) return NULL;
 			first = ast->list.first;
 			obj rest = ast->list.rest;
-			if (first->type != Fn) {
+			if (first->type != BuiltinFn) {
 				*err = NotCallableError; // todo
 				return NULL;
 			}

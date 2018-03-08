@@ -11,4 +11,6 @@ obj env_find(obj env, obj symbol);
 
 obj env_get(obj env, obj symbol);
 
+void env_bind_args(obj env, obj binds, obj exprs, int *err);
+
 #endif

@@ -1,22 +1,12 @@
 #include "types.h"
-
-// https://stackoverflow.com/a/32008147/4427997
-#define ABS(x) _Generic((x), \
-    signed char: abs(x), short: abs(x), int: abs(x), long: labs(x), long long: llabs(x))
-
-#define NORMALIZE_RATIO(r) \
-do { \
-    malp_denom_t gcd = ugcd(ABS((r).numerator), (r).denominator); \
-    (r).numerator /= (malp_int_t)gcd; \
-    (r).denominator /= gcd; \
-} while(0);
+#include "math.h"
 
 /**
  * https://rosettacode.org/wiki/Greatest_common_divisor#C
  */
 malp_denom_t ugcd(malp_denom_t u, malp_denom_t v)
 {
-	if (v) { while ((u %= v) && (v %= u)); }
+	if (v) { while ((u %= v) && (v %= u)) {} }
 	return (u + v);
 }
 

@@ -4,6 +4,8 @@
 #include <inttypes.h>
 #include <stdlib.h>
 
+#define STRLEN_STATIC(s) (sizeof(s) - 1)
+
 typedef union obj_s *obj;
 
 // TYPE
@@ -14,14 +16,15 @@ enum malp_type {
 	Ratio,
 	Real,
 	Symbol,
+	Keyword,
 	Nil,
 	True,
 	False,
 	String,
+	BuiltinFn,
 	Fn,
 	Env,
 	Error,
-	Keyword,
 	Vector,
 	HashMap,
 	Atom,
@@ -29,6 +32,9 @@ enum malp_type {
 };
 
 typedef int malp_type;
+
+#define IS_COLLECTION(l) ((l)->type == List || (l)->type == Vector)
+#define COUNT(l) ((l)->list.count)
 
 // LIST
 
@@ -39,7 +45,9 @@ typedef struct malp_list {
 	obj rest;
 } malp_list;
 
-obj empty_list; // todo: make const
+const obj const empty_list;
+
+obj empty_list_str;
 
 obj cons(obj list, obj element);
 
@@ -57,10 +65,22 @@ void set_length_mutating(obj list, size_t count);
 #define LIST_FIRST(l) ((l)->list.first)
 #define LIST_SECOND(l) ((l)->list.rest->list.first)
 
-// NUMBER
+#define MAP_FROM_TO(f, t) \
+do { \
+	(t) = new_list(); \
+	(t)->list.count = (f)->list.count; \
+	(t)->list.first = EVAL(ast->list.first, env, err); \
+	obj el = res; \
+	while ((ast = ast->list.rest) != empty_list) { \
+	el->list.rest = new_list(); \
+	el = el->list.rest; \
+	el->list.count = ast->list.count; \
+	el->list.first = EVAL(ast->list.first, env, err); \
+	} \
+	el->list.rest = empty_list; \
+}
 
-#define REAL(obj) ((obj)->real.value)
-#define INT(obj) ((obj)->int.value)
+// NUMBER
 
 typedef int64_t malp_int_t;
 typedef uint64_t malp_denom_t;
@@ -93,12 +113,14 @@ obj new_real(malp_real_t);
 obj new_ratio(malp_int_t, malp_denom_t);
 obj read_number(char *token);
 
-#define IS_ZERO(o) ( \
-	(o)->type == Int ? (o)->integer.value == 0 : \
-	(o)->type == Ratio ? (o)->ratio.numerator == 0 : \
-	(o)->real.value == 0)
-
 int is_number(obj o);
+
+#define NUMBER_VALUE(n) (\
+	(n)->type == Int ? (n)->integer.value : \
+	(n)->type == Ratio ? (n)->ratio.numerator / (malp_real_t) (n)->ratio.denominator : \
+	(n)->real.value)
+
+#define IS_ZERO(o) (NUMBER_VALUE(o) == 0)
 
 // SYMBOL
 
@@ -111,11 +133,21 @@ obj new_symbol(char *token, size_t length);
 
 #define SYMBOL_IS(sym, str) (0 == strcmp(sym->symbol.name, str))
 
+#define OBJ_IS_SYMBOL(o, str) ((o)->type == Symbol && SYMBOL_IS(o, str))
+
+// KEYWORD
+
+typedef struct malp_symbol malp_keyword;
+
+obj new_keyword(char *token, size_t length);
+
 // NIL
 
 typedef int malp_nil;
 
 obj nil_o;
+
+obj nil_str;
 
 int is_nil(obj);
 
@@ -124,6 +156,8 @@ int is_nil(obj);
 typedef int malp_true;
 
 obj true_o;
+
+obj true_str;
 
 int is_true(obj);
 
@@ -134,6 +168,8 @@ int is_truthy(obj);
 typedef int malp_false;
 
 obj false_o;
+
+obj false_str;
 
 int is_false(obj);
 
@@ -147,18 +183,42 @@ typedef struct malp_string {
 	char value[];
 } malp_string;
 
+obj new_empty_string(size_t len);
+
 obj new_string(char *token, size_t len);
 
 obj read_string(char *token, size_t len);
+
+obj empty_string;
+
+// VECTOR
+
+typedef struct malp_vector {
+	malp_type type;
+	size_t count;
+	uint32_t bitmask;
+	obj data[32];
+} malp_vector;
 
 // FUNCTION
 
 typedef obj (*malp_callable)(obj args, int *err);
 
-typedef struct malp_fn {
+typedef struct malp_builtin_fn {
 	malp_type type;
 	obj (*fn)(obj args, int *err);
+} malp_builtin_fn;
+
+typedef struct malp_fn {
+	malp_type type;
+	obj ast;
+	obj env;
+	obj binds;
 } malp_fn;
+
+obj new_fn(obj ast, obj env, obj binds);
+
+obj fn_str;
 
 // ENV
 
@@ -203,10 +263,12 @@ typedef union obj_s {
 	malp_ratio ratio;
 	malp_real real;
 	malp_symbol symbol;
+	malp_keyword keyword;
     malp_nil nil;
     malp_true true;
     malp_false false;
 	malp_string string;
+	malp_builtin_fn builtin_fn;
 	malp_fn fn;
 	malp_env env;
 	malp_error error;

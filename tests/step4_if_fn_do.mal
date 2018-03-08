@@ -230,14 +230,14 @@ a
 ;=>1
 ( (fn* (& more) (count more)) )
 ;=>0
-( (fn* (& more) (list? more)) )
-;=>true
+( (fn* (& more) more) )
+;=>nil
 ( (fn* (a & more) (count more)) 1 2 3)
 ;=>2
 ( (fn* (a & more) (count more)) 1)
 ;=>0
-( (fn* (a & more) (list? more)) 1)
-;=>true
+( (fn* (a & more) more) 1)
+;=>nil
 
 
 ;; Testing language defined not function

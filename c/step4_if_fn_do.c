@@ -1,219 +1,239 @@
-#include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
-#include <unistd.h>
+#include <stdlib.h>
+
 
 #include "types.h"
-#include "readline.h"
 #include "reader.h"
+#include "printer.h"
+#include "env.h"
+#include "readline.h"
 #include "core.h"
 
-// Declarations
-MalVal *EVAL(MalVal *ast, Env *env);
-
-// read
-MalVal *READ(char prompt[], char *str) {
-    char *line;
-    MalVal *ast;
-    if (str) {
-        line = str;
-    } else {
-        line = _readline(prompt);
-        if (!line) {
-            _error("EOF");
-            return NULL;
-        }
-    }
-    ast = read_str(line);
-    if (!str) { MAL_GC_FREE(line); }
-    return ast;
+obj READ(char *in) {
+	obj r = read_str(in);
+	return r;
 }
 
-// eval
-MalVal *eval_ast(MalVal *ast, Env *env) {
-    if (!ast || mal_error) return NULL;
-    if (ast->type == MAL_SYMBOL) {
-        //g_print("EVAL symbol: %s\n", ast->val.string);
-        return env_get(env, ast);
-    } else if ((ast->type == MAL_LIST) || (ast->type == MAL_VECTOR)) {
-        //g_print("EVAL sequential: %s\n", _pr_str(ast,1));
-        MalVal *el = _map2((MalVal *(*)(void*, void*))EVAL, ast, env);
-        if (!el || mal_error) return NULL;
-        el->type = ast->type;
-        return el;
-    } else if (ast->type == MAL_HASH_MAP) {
-        //g_print("EVAL hash_map: %s\n", _pr_str(ast,1));
-        GHashTableIter iter;
-        gpointer key, value;
-        MalVal *seq = malval_new_list(MAL_LIST,
-                                    g_array_sized_new(TRUE, TRUE, sizeof(MalVal*),
-                                                        _count(ast)));
-        g_hash_table_iter_init (&iter, ast->val.hash_table);
-        while (g_hash_table_iter_next (&iter, &key, &value)) {
-            MalVal *kname = malval_new_string((char *)key);
-            g_array_append_val(seq->val.array, kname);
-            MalVal *new_val = EVAL((MalVal *)value, env);
-            g_array_append_val(seq->val.array, new_val);
-        }
-        return _hash_map(seq);
-    } else {
-        //g_print("EVAL scalar: %s\n", _pr_str(ast,1));
-        return ast;
-    }
-}
+obj EVAL(obj ast, obj env, int *err);
 
-MalVal *EVAL(MalVal *ast, Env *env) {
-    if (!ast || mal_error) return NULL;
-    //g_print("EVAL: %s\n", _pr_str(ast,1));
-    if (ast->type != MAL_LIST) {
-        return eval_ast(ast, env);
-    }
-    if (!ast || mal_error) return NULL;
-
-    // apply list
-    //g_print("EVAL apply list: %s\n", _pr_str(ast,1));
-    int i, len;
-    if (_count(ast) == 0) { return ast; }
-    MalVal *a0 = _nth(ast, 0);
-    if ((a0->type & MAL_SYMBOL) &&
-        strcmp("def!", a0->val.string) == 0) {
-        //g_print("eval apply def!\n");
-        MalVal *a1 = _nth(ast, 1),
-               *a2 = _nth(ast, 2);
-        MalVal *res = EVAL(a2, env);
-        if (mal_error) return NULL;
-        env_set(env, a1, res);
-        return res;
-    } else if ((a0->type & MAL_SYMBOL) &&
-               strcmp("let*", a0->val.string) == 0) {
-        //g_print("eval apply let*\n");
-        MalVal *a1 = _nth(ast, 1),
-               *a2 = _nth(ast, 2),
-               *key, *val;
-        assert_type(a1, MAL_LIST|MAL_VECTOR,
-                    "let* bindings must be list or vector");
-        len = _count(a1);
-        assert((len % 2) == 0, "odd number of let* bindings forms");
-        Env *let_env = new_env(env, NULL, NULL);
-        for(i=0; i<len; i+=2) {
-            key = g_array_index(a1->val.array, MalVal*, i);
-            val = g_array_index(a1->val.array, MalVal*, i+1);
-            assert_type(key, MAL_SYMBOL, "let* bind to non-symbol");
-            env_set(let_env, key, EVAL(val, let_env));
-        }
-        return EVAL(a2, let_env);
-    } else if ((a0->type & MAL_SYMBOL) &&
-               strcmp("do", a0->val.string) == 0) {
-        //g_print("eval apply do\n");
-        MalVal *el = eval_ast(_rest(ast), env);
-        return _last(el);
-    } else if ((a0->type & MAL_SYMBOL) &&
-               strcmp("if", a0->val.string) == 0) {
-        //g_print("eval apply if\n");
-        MalVal *a1 = _nth(ast, 1);
-        MalVal *cond = EVAL(a1, env);
-        if (!cond || mal_error) return NULL;
-        if (cond->type & (MAL_FALSE|MAL_NIL)) {
-            // eval false slot form
-            if (ast->val.array->len > 3) {
-                return EVAL(_nth(ast, 3), env);
-            } else {
-                return &mal_nil;
-            }
-        } else {
-            // eval true slot form
-            MalVal *a2 = _nth(ast, 2);
-            return EVAL(a2, env);
-        }
-    } else if ((a0->type & MAL_SYMBOL) &&
-               strcmp("fn*", a0->val.string) == 0) {
-        //g_print("eval apply fn*\n");
-        MalVal *mf = malval_new(MAL_FUNCTION_MAL, NULL);
-        mf->val.func.evaluator = EVAL;
-        mf->val.func.args = _nth(ast, 1);
-        mf->val.func.body = _nth(ast, 2);
-        mf->val.func.env = env;
-        return mf;
-    } else {
-        //g_print("eval apply\n");
-        MalVal *el = eval_ast(ast, env);
-        if (!el || mal_error) { return NULL; }
-        MalVal *f = _first(el),
-               *args = _rest(el);
-        assert_type(f, MAL_FUNCTION_C|MAL_FUNCTION_MAL,
-                    "cannot apply '%s'", _pr_str(f,1));
-        return _apply(f, args);
-    }
-}
-
-// print
-char *PRINT(MalVal *exp) {
-    if (mal_error) {
-        fprintf(stderr, "Error: %s\n", mal_error->val.string);
-        malval_free(mal_error);
-        mal_error = NULL;
-        return NULL;
-    }
-    return _pr_str(exp,1);
-}
-
-// repl
-
-// read and eval
-MalVal *RE(Env *env, char *prompt, char *str) {
-    MalVal *ast, *exp;
-    ast = READ(prompt, str);
-    if (!ast || mal_error) return NULL;
-    exp = EVAL(ast, env);
-    if (ast != exp) {
-        malval_free(ast);    // Free input structure
-    }
-    return exp;
-}
-
-// Setup the initial REPL environment
-Env *repl_env;
-
-void init_repl_env() {
-    repl_env = new_env(NULL, NULL, NULL);
-
-    // core.c: defined using C
-    int i;
-    for(i=0; i < (sizeof(core_ns) / sizeof(core_ns[0])); i++) {
-        env_set(repl_env,
-                malval_new_symbol(core_ns[i].name),
-                malval_new_function(core_ns[i].func, core_ns[i].arg_cnt));
-    }
-
-    // core.mal: defined using the language itself
-    RE(repl_env, "", "(def! not (fn* (a) (if a false true)))");
-}
-
-int main()
+obj invoke_fn(obj fn, obj args, int *err)
 {
-    MalVal *exp;
-    char *output;
-    char prompt[100];
+	if (fn->type == BuiltinFn) {
+		return fn->builtin_fn.fn(args, err);
+	} else if (fn->type == Fn) {
+		obj fn_env = new_env((unsigned) fn->fn.binds->list.count, fn->fn.env);
+		env_bind_args(fn_env, fn->fn.binds, args, err);
+		if (*err) return NULL;
+		return EVAL(fn->fn.ast, fn_env, err);
+	} else if (fn->type == Keyword) {
+		return NULL; // todo
+	} else if (fn->type == HashMap) {
+		return NULL; // todo
+	} else {
+		*err = NotCallableError;
+		return NULL;
+	}
+}
 
-    MAL_GC_SETUP();
+obj eval_ast(obj ast, obj env, int *err)
+{
+	switch (ast->type) {
+		case Symbol: {
+			obj value = env_get(env, ast);
+			if (NULL == value) *err = SymbolNotFoundError; // todo
+			return value;
+		}
+		case List: {
+			obj res = new_list();
+			res->list.count = ast->list.count;
+			res->list.first = EVAL(ast->list.first, env, err);
 
-    // Set the initial prompt and environment
-    snprintf(prompt, sizeof(prompt), "user> ");
-    init_repl_env();
- 
-    // repl loop
-    for(;;) {
-        exp = RE(repl_env, prompt, NULL);
-        if (mal_error && strcmp("EOF", mal_error->val.string) == 0) {
-            return 0;
-        }
-        output = PRINT(exp);
+			obj el = res;
+			while ((ast = ast->list.rest) != empty_list) {
+				el->list.rest = new_list();
+				el = el->list.rest;
+				el->list.count = ast->list.count;
+				el->list.first = EVAL(ast->list.first, env, err);
+				el->list.rest = empty_list;
+			}
 
-        if (output) { 
-            puts(output);
-            MAL_GC_FREE(output);        // Free output string
-        }
+			return res;
+		}
+		default:
+			return ast;
+	}
+}
 
-        //malval_free(exp);    // Free evaluated expression
-    }
+obj EVAL(obj ast, obj env, int *err) {
+	if (ast == NULL) return ast; // todo remove once reader is complete
+	if (ast == empty_list) {
+		return ast;
+	} else if (ast->type == List) {
+		obj first = ast->list.first;
+
+		if (OBJ_IS_SYMBOL(first, "def!")) {
+			if (ast->list.count != 3) {
+				*err = ArityError; // todo
+				return NULL;
+			}
+			obj symbol = LIST_FIRST(ast->list.rest);
+			if (symbol->type != Symbol) {
+				*err = InvalidArgumentError; // todo
+				return NULL;
+			}
+			obj value = EVAL(LIST_SECOND(ast->list.rest), env, err);
+			if (*err) return NULL;
+			env_set(env, symbol, value);
+			return value;
+
+		} else if (OBJ_IS_SYMBOL(first, "let*")) {
+			if (ast->list.count != 3) {
+				*err = ArityError; // todo
+				return NULL;
+			}
+			obj bindings = LIST_FIRST(ast->list.rest);
+			obj result = LIST_SECOND(ast->list.rest);
+			if (List != bindings->type) {
+				*err = InvalidArgumentError; // todo
+				return NULL;
+			}
+			if (bindings->list.count % 2 != 0) {
+				*err = ArityError; // todo
+				return NULL;
+			}
+			obj let_env = new_env((unsigned)bindings->list.count / 2, env);
+			while (empty_list != bindings) {
+				if (LIST_FIRST(bindings)->type != Symbol) {
+					*err = InvalidArgumentError; // todo
+					return NULL;
+				}
+				env_set(let_env, LIST_FIRST(bindings), EVAL(LIST_SECOND(bindings), let_env, err));
+				if (*err) return NULL;
+
+				bindings = bindings->list.rest->list.rest;
+			}
+			return EVAL(result, let_env, err);
+
+		} else if (OBJ_IS_SYMBOL(first, "fn*")){
+			return new_fn(
+				LIST_SECOND(ast->list.rest),
+				env,
+				LIST_FIRST(ast->list.rest)
+			); // todo: (every? symbol? binds)
+
+		} else if (OBJ_IS_SYMBOL(first, "if")){
+			if (ast->list.count != 4 && ast->list.count != 3) {
+				*err = ArityError;
+				return NULL;
+			}
+			obj results = ast->list.rest->list.rest;
+			if (is_truthy(EVAL(LIST_SECOND(ast), env, err))) {
+				return EVAL(LIST_FIRST(results), env, err);
+			} else {
+				results = LIST_SECOND(results);
+				if (NULL == results) return nil_o;
+				return EVAL(results, env, err);
+			}
+
+		} else if (OBJ_IS_SYMBOL(first, "do")){
+			ast = ast->list.rest;
+			obj result = NULL;
+			while (empty_list != ast && !*err) {
+				result = EVAL(LIST_FIRST(ast), env, err);
+
+				ast = ast->list.rest;
+			}
+			return result;
+
+		} else {
+			ast = eval_ast(ast, env, err);
+			if (*err) return NULL;
+			first = ast->list.first;
+			obj rest = ast->list.rest;
+			return invoke_fn(first, rest, err);
+		}
+
+	} else {
+		return eval_ast(ast, env, err);
+	}
+}
+
+void PRINT(obj ast) {
+	print_string(pr_str(ast, 1), 1);
+}
+
+void rep(char *in, obj env, int *err) {
+	obj ast = READ(in);
+	if (!ast) return;
+	ast = EVAL(ast, env, err);
+	if (!ast) return;
+	PRINT(ast);
+}
+
+static int *err_marker;
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+void keyboard_interrupt(int _)
+{
+	*err_marker = KeyboardInterrupt;
+}
+#pragma GCC diagnostic pop
+
+int main() {
+	char *line;
+
+	obj repl_env = new_env(1, NULL);
+	core_load_vars(repl_env);
+	empty_list_str = new_string("()", 2);
+	fn_str = new_string("#(...)", 6);
+	nil_str = new_string("nil", 3);
+	true_str = new_string("true", 4);
+	false_str = new_string("false", 5);
+	int err = 0;
+
+	init_readline(repl_env);
+
+	EVAL(READ("(def! not (fn* (a) (if a false true)))"), repl_env, &err);
+
+	err_marker = &err;
+
+	while(1) {
+		line = next_line();
+		if (!line) {
+			fputc('\n', stdout);
+			return 0;
+		}
+		if (*line) {
+			rep(line, repl_env, &err);
+		}
+		free(line);
+
+		if (err) {
+			char *msg;
+			switch (err) {
+				case ArityError:
+					msg = "Wrong number of args passed\n";
+					break;
+				case InvalidArgumentError:
+					msg = "Invalid argument\n";
+					break;
+				case ReaderError:
+					msg = "Could not parse\n";
+					break;
+				case SymbolNotFoundError:
+					msg = "Unable to resolve symbol\n";
+					break;
+				case NotCallableError:
+					msg = "Object is not callable\n";
+					break;
+				default:
+					msg = "something bad happened!\n";
+					break;
+			}
+			fputs("Error: ", stderr);
+			fputs(msg, stderr);
+			err = 0;
+		}
+	}
 }

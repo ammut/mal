@@ -21,7 +21,7 @@ void env_set(obj env, obj symbol, obj value)
 		}
 		env->env.data_size *= 2;
 		for (unsigned j = 0; j < i; ++j) {
-			env_set(env, symtab[i].symbol, symtab[i].value);
+			env_set(env, symtab[j].symbol, symtab[j].value);
 		}
 		symtab = env->env.data;
 	}
@@ -55,4 +55,28 @@ obj env_get(obj env, obj symbol)
 		}
 	}
 	return NULL;
+}
+
+void env_bind_args(obj env, obj binds, obj exprs, int *err)
+{
+	while (empty_list != binds) {
+		if (OBJ_IS_SYMBOL(LIST_FIRST(binds), "&")) {
+			if (LIST_SECOND(binds)) {
+				env_set(
+					env,
+					LIST_SECOND(binds),
+					exprs == empty_list ? nil_o : exprs
+				);
+			}
+			return;
+		}
+		if (empty_list == exprs) {
+			*err = ArityError;
+			return;
+		}
+		env_set(env, LIST_FIRST(binds), LIST_FIRST(exprs));
+
+		binds = binds->list.rest;
+		exprs = exprs->list.rest;
+	}
 }

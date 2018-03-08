@@ -7,8 +7,8 @@
 
 #define DEF_BUILTIN_FN(name) \
 static obj name##_(obj, int*); \
-obj name = (obj)&(malp_fn){ \
-	.type = Fn, \
+obj name = (obj)&(malp_builtin_fn){ \
+	.type = BuiltinFn, \
 	.fn = name##_, \
 }; \
 static obj name##_
@@ -18,20 +18,49 @@ enum errors {
 	InvalidArgumentError,
 	ReaderError,
 	SymbolNotFoundError,
-	NotCallableError
+	NotCallableError,
+	KeyboardInterrupt,
 };
 
-obj init_repl_env();
+void core_load_vars(obj env);
 
-obj numberQUESTION;
+obj malp_core_numberQUESTION;
 
-obj PLUS;
+obj malp_core_PLUS;
 
-obj MINUS;
+obj malp_core_MINUS;
 
-obj STAR;
+obj malp_core_STAR;
 
-obj SLASH;
+obj malp_core_SLASH;
+
+obj malp_core_prMINUSstr;
+
+obj malp_core_str;
+
+obj malp_core_prn;
+
+obj malp_core_print;
+
+obj malp_core_println;
+
+obj malp_core_list;
+
+obj malp_core_listQUESTION;
+
+obj malp_core_emptyQUESTION;
+
+obj malp_core_count;
+
+obj malp_core_EQUAL;
+
+obj malp_core_LT;
+
+obj malp_core_LE;
+
+obj malp_core_GT;
+
+obj malp_core_GE;
 
 #if 0
 

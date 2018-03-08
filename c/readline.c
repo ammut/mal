@@ -9,23 +9,38 @@
 
 #include "readline.h"
 
+#define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
+
 static obj completion_env;
 
 static char *next_symbol_like(const char *text, int state)
 {
-	static size_t i, len;
-	obj symbol;
+	static size_t i, j, len;
+	char *singleton;
+	static char *singletons[] = {
+		"nil",
+		"false",
+		"true",
+	};
 
 	if (!state) {
-		i = 0;
+		i = j = 0;
 		len = strlen(text);
 	}
 
 	malp_symtab_elem *symtab = completion_env->env.data;
 
+	obj symbol;
 	while ((symbol = symtab[i++].symbol) != NULL) {
 		if (strncmp(symbol->symbol.name, text, len) == 0) {
 			return strdup(symbol->symbol.name);
+		}
+	}
+
+	while (j < ARRAY_SIZE(singletons)) {
+		singleton = singletons[j++];
+		if (strncmp(singleton, text, len) == 0) {
+			return strdup(singleton);
 		}
 	}
 

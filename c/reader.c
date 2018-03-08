@@ -3,15 +3,27 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "reader.h"
 #include "types.h"
+#include "reader.h"
 #include "core.h"
+
+typedef struct reader {
+	unsigned position;
+	char **tokens;
+} reader_s;
 
 static obj read_form(reader_s*);
 static obj read_list(reader_s*);
+static obj read_vec(reader_s*);
+static obj read_map(reader_s*);
 static obj read_atom(reader_s*);
+static obj read_macro_quote(reader_s*);
+static obj read_macro_quasiquote(reader_s*);
+static obj read_macro_unquote(reader_s*);
+static obj read_macro_deref(reader_s*);
 
 static char **tokenize(char*);
+static char **validate_tokens(char **tokens);
 
 static size_t get_token_type(char *in);
 static size_t skip_whitespace(char *in);
@@ -19,7 +31,7 @@ static size_t tokenize_next(char* in, int *err);
 
 enum token_type {
 	rose_token, special_token, string_token,
-	comment_token, number_token, other_token
+	comment_token, number_token, other_token, keyword_token,
 };
 
 static char* peek(reader_s *reader)
@@ -35,7 +47,15 @@ static char* next(reader_s *reader)
 obj read_str(char *in)
 {
 	char **tokens = tokenize(in);
-	if (tokens == NULL) return (void *) tokens; // todo: crash horribly
+	if (tokens == NULL) return NULL; // todo: crash horribly
+	char **error = validate_tokens(tokens);
+	if (error) {
+		if (*error == NULL)
+			fprintf(stderr, "Unexpected end of input\n");
+		else
+			fprintf(stderr, "Unmatched brackets: %s\n", *error);
+		return NULL;
+	}
 	reader_s r = { .tokens = tokens, .position = 0 };
 	obj v = read_form(&r);
 	free (*tokens); free(tokens);
@@ -45,7 +65,14 @@ obj read_str(char *in)
 static obj read_form(reader_s *r)
 {
 	obj v;
-	if ('(' == peek(r)[0]) v = read_list(r);
+	char next = peek(r)[0];
+	if ('(' == next) v = read_list(r);
+	else if ('[' == next) v = read_vec(r);
+	else if ('{' == next) v = read_map(r);
+	else if ('\'' == next) v = read_macro_quote(r);
+	else if ('`' == next) v = read_macro_quasiquote(r);
+	else if ('~' == next) v = read_macro_unquote(r);
+	else if ('@' == next) v = read_macro_deref(r);
 	else v = read_atom(r);
 	if (NULL == v) return v;
 	return v;
@@ -54,7 +81,10 @@ static obj read_form(reader_s *r)
 static obj read_list(reader_s *r)
 {
 	(void)next(r);
-	if (peek(r)[0] == ')') return empty_list;
+	if (peek(r)[0] == ')') {
+		(void)next(r);
+		return empty_list;
+	}
 
 	obj head = NULL;
 	obj tail = head;
@@ -76,12 +106,41 @@ static obj read_list(reader_s *r)
 	return NULL;
 }
 
+static obj read_vec(reader_s *r) // todo: this is a copy of read_list...
+{
+	(void)next(r);
+	if (peek(r)[0] == ']') return empty_list;
+
+	obj head = NULL;
+	obj tail = head;
+	unsigned count = 0;
+
+	while (peek(r) && peek(r)[0] != ']') { // read_form$read_atom will call next(r)
+		obj el = read_form(r);
+		if (!el) goto read_vec_err;
+		tail = append_mutating(tail, el);
+		++count;
+		if (!tail) goto read_vec_err;
+		if (!head) head = tail;
+	}
+	if (NULL == next(r)) goto read_vec_err;
+	set_length_mutating(head, count);
+	return head;
+
+read_vec_err:
+	return NULL;
+}
+
+static obj read_map(reader_s *r)
+{
+	peek(r);
+	return NULL;
+}
+
 static obj read_atom(reader_s *r)
 {
 	char *token = next(r);
 	size_t len = strlen(token);
-
-	// todo: rebuild the lexer
 
 	switch (get_token_type(token)) {
 		case rose_token:
@@ -90,6 +149,8 @@ static obj read_atom(reader_s *r)
 			return NULL;
 		case string_token:
 			return read_string(token, len);
+		case keyword_token:
+			return new_keyword(token, len);
 		case comment_token:
 			return NULL;
 		case number_token:
@@ -103,14 +164,57 @@ static obj read_atom(reader_s *r)
 	return NULL;
 }
 
+static obj read_macro_quote(reader_s *r)
+{
+	(void)next(r);
+	if (NULL == peek(r)) return NULL; // todo: crash horribly until we have better error handling
+
+	char symbol[] = "quote";
+	return cons(cons(empty_list, read_form(r)), new_symbol(symbol, STRLEN_STATIC(symbol)));
+}
+
+static obj read_macro_quasiquote(reader_s *r)
+{
+	(void)next(r);
+	if (NULL == peek(r)) return NULL; // todo: crash horribly until we have better error handling
+
+	char symbol[] = "quasiquote";
+	return cons(cons(empty_list, read_form(r)), new_symbol(symbol, STRLEN_STATIC(symbol)));
+}
+
+static obj read_macro_unquote(reader_s *r)
+{
+	char *macro = next(r);
+	if (NULL == peek(r)) return NULL; // todo: crash horribly until we have better error handling
+
+	if ('@' == macro[1]) {
+		char symbol[] = "splice-unquote";
+		return cons(cons(empty_list, read_form(r)), new_symbol(symbol, STRLEN_STATIC(symbol)));
+	} else {
+		char symbol[] = "unquote";
+		return cons(cons(empty_list, read_form(r)), new_symbol(symbol, STRLEN_STATIC(symbol)));
+	}
+}
+
+static obj read_macro_deref(reader_s *r)
+{
+	(void)next(r);
+	if (NULL == peek(r)) return NULL; // todo: crash horribly until we have better error handling
+
+	char symbol[] = "deref";
+	return cons(cons(empty_list, read_form(r)), new_symbol(symbol, STRLEN_STATIC(symbol)));
+}
+
+
 /**
  * returns a list of strings, which must be freed when done with it by first
  * freeing the first element of the list and then the list itself, i.e.:
  *
- * ```c
+ * <pre>
  * char **tokens = tokenize(in);
  * ...
  * free(*tokens); free(tokens);
+ * </pre>
  */
 static char **tokenize(char* in)
 {
@@ -135,11 +239,17 @@ static char **tokenize(char* in)
 		if (in_pos == in_len) break; // EOI
 		found = tokenize_next(in + in_pos, &err);
 		assert(found);
+		if (get_token_type(in + in_pos) == comment_token) {
+			in_pos += found;
+			continue;
+		}
 
 		tokens[tokens_pos++] = token_buff + buff_pos;
 		while(found--) token_buff[buff_pos++] = in[in_pos++];
 		token_buff[buff_pos++] = '\0';
 	}
+
+	if (tokens_pos == 0) goto tokenize_err;
 
 	return tokens;
 
@@ -371,6 +481,9 @@ static size_t get_token_type(char* in)
 		case '"':
 			return string_token;
 
+		case ':':
+			return keyword_token;
+
 		case ';':
 			return comment_token;
 
@@ -382,3 +495,47 @@ static size_t get_token_type(char* in)
 	return other_token;
 }
 
+size_t find_matching_brackets(char **tokens, int *err)
+{
+	size_t i = 0;
+	while (tokens[++i] != NULL) {
+		char current = *tokens[i];
+		if (current == '(' || current == '[' || current == '{') {
+			size_t next = i + find_matching_brackets(tokens + i, err);
+			if (*err) return next;
+			char closing = *tokens[next];
+			if ((current == '(' && closing != ')') ||
+				(current == '[' && closing != ']') ||
+				(current == '{' && closing != '}')) {
+				*err = 1;
+				return next;
+			}
+			i = next;
+		} else if (current == ')' || current == ']' || current == '}')
+			return i;
+	}
+	*err = 1; // hit EOF
+	return i;
+}
+
+static char **validate_tokens(char **tokens)
+{
+	size_t i = 0;
+	int err = 0;
+	while (tokens[i] != NULL) {
+		char current = *tokens[i];
+		if (current == '(' || current == '[' || current == '{') {
+			size_t next = i + find_matching_brackets(tokens + i, &err);
+			if (err) return tokens + next;
+			char closing = *tokens[next];
+			if ((current == '(' && closing != ')') ||
+				(current == '[' && closing != ']') ||
+				(current == '{' && closing != '}')) {
+				return tokens + next;
+			}
+			i = next;
+		}
+		++i;
+	}
+	return NULL; // no error found
+}

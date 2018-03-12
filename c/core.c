@@ -1,11 +1,14 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "types.h"
 #include "math.h"
 #include "env.h"
+#include "main.h"
 #include "core.h"
 #include "printer.h"
+#include "reader.h"
 
 #define RET_ARITY_ERROR_IF(cond, err) \
 	if (cond) { \
@@ -34,6 +37,17 @@ void core_load_vars(obj env)
 	env_set(env, new_symbol("<=", STRLEN_STATIC("<=")), malp_core_LE);
 	env_set(env, new_symbol(">", STRLEN_STATIC(">")), malp_core_GT);
 	env_set(env, new_symbol(">=", STRLEN_STATIC(">=")), malp_core_GE);
+	env_set(env, new_symbol("slurp", STRLEN_STATIC("slurp")), malp_core_slurp);
+	env_set(env, new_symbol("read-string", STRLEN_STATIC("read-string")), malp_core_readMINUSstring);
+	env_set(env, new_symbol("atom", STRLEN_STATIC("atom")), malp_core_atom);
+	env_set(env, new_symbol("atom?", STRLEN_STATIC("atom")), malp_core_atomQUESTION);
+	env_set(env, new_symbol("deref", STRLEN_STATIC("deref")), malp_core_deref);
+	env_set(env, new_symbol("reset!", STRLEN_STATIC("reset!")), malp_core_resetIMPURE);
+	env_set(env, new_symbol("swap!", STRLEN_STATIC("swap!")), malp_core_swapIMPURE);
+	env_set(env, new_symbol("first", STRLEN_STATIC("first")), malp_core_first);
+	env_set(env, new_symbol("rest", STRLEN_STATIC("rest")), malp_core_rest);
+	env_set(env, new_symbol("cons", STRLEN_STATIC("cons")), malp_core_cons);
+	env_set(env, new_symbol("concat", STRLEN_STATIC("concat")), malp_core_concat);
 }
 
 DEF_BUILTIN_FN(malp_core_numberQUESTION)(obj args, int *err)
@@ -437,3 +451,165 @@ DEF_BUILTIN_FN(malp_core_GE)(obj args, int *err)
 	return true_o;
 }
 
+DEF_BUILTIN_FN(malp_core_readMINUSstring)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
+	if (LIST_FIRST(args)->type != String) {
+		*err = InvalidArgumentError;
+		return NULL;
+	}
+	return read_str(LIST_FIRST(args)->string.value);
+}
+
+DEF_BUILTIN_FN(malp_core_slurp)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
+	if (LIST_FIRST(args)->type != String) {
+		*err = InvalidArgumentError;
+		return NULL;
+	}
+	args = LIST_FIRST(args);
+	FILE *f = fopen(args->string.value, "rb");
+	if (NULL == f) {
+		*err = IOError;
+		return NULL;
+	}
+	fseek(f, 0, SEEK_END);
+	size_t fsize = (size_t)ftell(f);
+	fseek(f, 0, SEEK_SET);  //same as rewind(f);
+
+	obj res = new_empty_string(fsize);
+	char *string = res->string.value;
+	size_t actual = fread(string, 1, fsize, f);
+	if (actual != (unsigned long)fsize) {
+		*err = IOError;
+		puts("slurp unequal bytes read");
+		return NULL;
+	}
+	fclose(f);
+	return res;
+}
+
+DEF_BUILTIN_FN(malp_core_atom)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
+	return new_atom(LIST_FIRST(args));
+}
+
+DEF_BUILTIN_FN(malp_core_atomQUESTION)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
+	return LIST_FIRST(args)->type == Atom ? true_o : false_o;
+}
+
+DEF_BUILTIN_FN(malp_core_deref)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
+	if (LIST_FIRST(args)->type != Atom) {
+		*err = InvalidArgumentError;
+		return NULL;
+	}
+	return LIST_FIRST(args)->atom.value;
+}
+
+DEF_BUILTIN_FN(malp_core_resetIMPURE)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count != 2, *err);
+	if (LIST_FIRST(args)->type != Atom) {
+		*err = InvalidArgumentError;
+		return NULL;
+	}
+	LIST_FIRST(args)->atom.value = LIST_SECOND(args);
+	return LIST_SECOND(args);
+}
+
+DEF_BUILTIN_FN(malp_core_swapIMPURE)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count < 2, *err);
+	if (LIST_FIRST(args)->type != Atom ||
+		(LIST_SECOND(args)->type != BuiltinFn && LIST_SECOND(args)->type != Fn)) {
+		*err = InvalidArgumentError;
+		return NULL;
+	}
+	obj atom = LIST_FIRST(args);
+	obj fn = LIST_SECOND(args);
+	args = args->list.rest->list.rest;
+	args = cons(args, atom->atom.value);
+	if (fn->type == BuiltinFn) {
+		args = fn->builtin_fn.fn(args, err);
+	} else {
+		obj env = new_env((unsigned) fn->fn.binds->list.count, fn->fn.env);
+		env_bind_args(env, fn->fn.binds, args, err);
+		if (*err) return NULL;
+		args = EVAL(fn->fn.ast, env, err);
+	}
+	if (*err) return NULL;
+	atom->atom.value = args; // here comes the mutex update
+	return args;
+}
+
+DEF_BUILTIN_FN(malp_core_first)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
+	args = LIST_FIRST(args);
+	if (args->type != List &&
+		args->type != Vector &&
+		args->type != HashMap) {
+		*err = InvalidArgumentError;
+		return NULL;
+	}
+	return args == empty_list ?
+		   nil_o :
+		   args->list.first;
+}
+
+DEF_BUILTIN_FN(malp_core_rest)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
+	args = LIST_FIRST(args);
+	if (args->type != List &&
+		args->type != Vector &&
+		args->type != HashMap) {
+		*err = InvalidArgumentError;
+		return NULL;
+	}
+	return args == empty_list ?
+		   args :
+		   args->list.rest;
+}
+
+DEF_BUILTIN_FN(malp_core_cons)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count != 2, *err);
+	obj x = LIST_FIRST(args);
+	args = LIST_SECOND(args);
+	if (args->type != List &&
+		args->type != Vector &&
+		args->type != HashMap) {
+		*err = InvalidArgumentError;
+		return NULL;
+	}
+	return cons(args, x);
+}
+
+static obj concat_helper_cons(obj pre, obj post)
+{
+	if (empty_list == pre) return post;
+	return cons(concat_helper_cons(pre->list.rest, post), pre->list.first);
+}
+
+DEF_BUILTIN_FN(malp_core_concat)(obj args, int *err)
+{
+	obj first = LIST_FIRST(args);
+	if (first->type != List &&
+		first->type != Vector &&
+		first->type != HashMap) {
+		*err = InvalidArgumentError;
+		return NULL;
+	}
+	if (empty_list == args) return args;
+	if (args->list.count == 1) return first;
+	args = malp_core_concat_(args->list.rest, err);
+	if (*err) return NULL;
+	return concat_helper_cons(first, args);
+}

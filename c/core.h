@@ -20,6 +20,7 @@ enum errors {
 	SymbolNotFoundError,
 	NotCallableError,
 	KeyboardInterrupt,
+	IOError,
 };
 
 void core_load_vars(obj env);
@@ -61,6 +62,28 @@ obj malp_core_LE;
 obj malp_core_GT;
 
 obj malp_core_GE;
+
+obj malp_core_readMINUSstring;
+
+obj malp_core_slurp;
+
+obj malp_core_atom;
+
+obj malp_core_atomQUESTION;
+
+obj malp_core_deref;
+
+obj malp_core_resetIMPURE;
+
+obj malp_core_swapIMPURE;
+
+obj malp_core_first;
+
+obj malp_core_rest;
+
+obj malp_core_cons;
+
+obj malp_core_concat;
 
 #if 0
 

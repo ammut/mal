@@ -134,7 +134,7 @@ eval_start:
 				ast = LIST_FIRST(results);
 			} else {
 				ast = LIST_SECOND(results);
-				if (NULL == results) return nil_o;
+				if (NULL == ast) return nil_o;
 			}
 			goto eval_start;
 

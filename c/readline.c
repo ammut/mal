@@ -21,6 +21,11 @@ static char *next_symbol_like(const char *text, int state)
 		"nil",
 		"false",
 		"true",
+		"def!",
+		"fn*",
+		"let*",
+		"do",
+		"if",
 	};
 
 	if (!state) {
@@ -52,6 +57,9 @@ static char *next_symbol_like(const char *text, int state)
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 static char **do_autocomplete(const char *text, int start, int end)
 {
+	if (rl_completion_quote_character) {
+		return NULL;
+	}
 	rl_attempted_completion_over = 1;
 	return rl_completion_matches(text, next_symbol_like);
 }

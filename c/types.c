@@ -239,20 +239,22 @@ obj empty_string = (obj)&(malp_string){
 
 obj new_empty_string(size_t len)
 {
-	obj r  = malloc(ALIGN_OBJ(sizeof(malp_string) + len));
+	obj r  = malloc(ALIGN_OBJ(sizeof(malp_string) + len + 1));
 	if (r == NULL) return r;
 	r->type = String;
 	r->string.length = len;
+	r->string.value[len] = 0;
 	return r;
 }
 
 obj new_string(char *value, size_t len)
 {
-	obj r  = malloc(ALIGN_OBJ(sizeof(malp_string) + len));
+	obj r  = malloc(ALIGN_OBJ(sizeof(malp_string) + len + 1));
 	if (r == NULL) return r;
 	r->type = String;
 	r->string.length = len;
 	memcpy(r->string.value, value, len);
+	r->string.value[len] = 0;
 	return r;
 }
 
@@ -260,7 +262,7 @@ static size_t decode_malp_string(char *buffer, char *token, size_t len, int *err
 
 obj read_string(char *token, size_t len)
 {
-	char buf[ALIGN_WORD(len + 1)]; // -2 quotes, +3 branchless utf8_decode
+	char buf[ALIGN_WORD(len + 1)];
 	int err = 0;
 	len = decode_malp_string(buf, token + 1, len - 2, &err);
 	if (err) return NULL;
@@ -326,14 +328,14 @@ static int decode_hex(char **buffer, char **token, int *err)
 	*_buffer = (char)((hex2i(*_token) << 4u) | hex2i(*(_token + 1)));
 	*buffer = _buffer;
 	*token = _token;
-	*err = 0;
+	*err = 0; // -Werror=unused-parameter
 	return 1;
 }
 
 static int decode_octal(char **buffer, char **token, int *err)
 {
 	char *_buffer = *buffer, *_token = *token;
-	*_buffer = *_token++ - '0';
+	*_buffer = (char)(*_token++ - '0');
 	if (*_token >= '0' && *_token < '8') {
 		*_buffer += *_token++ - '0';
 		if (*_token >= '0' && *_token < '8') {
@@ -342,7 +344,7 @@ static int decode_octal(char **buffer, char **token, int *err)
 	}
 	*buffer = _buffer + 1;
 	*token = _token;
-	*err = 0;
+	*err = 0; // -Werror=unused-parameter
 	return 1;
 }
 
@@ -399,6 +401,17 @@ static int decode_unicode(char **buffer, char **token, int *err)
 		return 0;
 	}
 
+}
+
+// ATOM
+
+obj new_atom(obj value)
+{
+	obj r = malloc(ALIGN_OBJ(sizeof(malp_atom)));
+	if (r == NULL) return r;
+	r->type = Atom;
+	r->atom.value = value;
+	return r;
 }
 
 // FUNCTION

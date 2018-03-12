@@ -172,8 +172,14 @@ obj pr_str(obj ast, int print_readably)
 		case BuiltinFn:
 		case Fn:
 			return fn_str;
+		case Atom: {
+			obj val = ast->atom.value;
+			val = pr_str(val, print_readably);
+			ast = new_empty_string(7 + val->string.length);
+			sprintf(ast->string.value, "(atom %s)", val->string.value);
+			return ast;
+		}
 		case Vector:
-		case Atom:
 		case HashMap:
 		default:
 			return new_string("<impl missing>", 14);

@@ -21,13 +21,13 @@ enum malp_type {
 	True,
 	False,
 	String,
+	Atom,
 	BuiltinFn,
 	Fn,
 	Env,
 	Error,
 	Vector,
 	HashMap,
-	Atom,
 	Forward,
 };
 
@@ -49,7 +49,7 @@ const obj const empty_list;
 
 obj empty_list_str;
 
-obj cons(obj list, obj element);
+obj cons(obj list, obj element) __attribute_warn_unused_result__;
 
 obj new_list();
 
@@ -191,6 +191,17 @@ obj read_string(char *token, size_t len);
 
 obj empty_string;
 
+#define OBJ_IS_STRING(o, str) ((o)->type == String && 0 == strcmp((o)->string.value, str))
+
+// ATOM
+
+typedef struct malp_atom {
+	malp_type type;
+	obj value;
+} malp_atom;
+
+obj new_atom(obj value);
+
 // VECTOR
 
 typedef struct malp_vector {
@@ -268,6 +279,7 @@ typedef union obj_s {
     malp_true true;
     malp_false false;
 	malp_string string;
+	malp_atom atom;
 	malp_builtin_fn builtin_fn;
 	malp_fn fn;
 	malp_env env;

@@ -5,6 +5,6 @@
 
 #include "types.h"
 
-obj read_str(char* in);
+obj read_str(char *in);
 
 #endif

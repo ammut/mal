@@ -46,8 +46,8 @@ void core_load_vars(obj env)
 	env_set(env, new_symbol("swap!", STRLEN_STATIC("swap!")), malp_core_swapIMPURE);
 	env_set(env, new_symbol("first", STRLEN_STATIC("first")), malp_core_first);
 	env_set(env, new_symbol("rest", STRLEN_STATIC("rest")), malp_core_rest);
-	env_set(env, new_symbol("cons", STRLEN_STATIC("cons")), malp_core_cons);
-	env_set(env, new_symbol("concat", STRLEN_STATIC("concat")), malp_core_concat);
+	env_set(env, cons_sym, malp_core_cons);
+	env_set(env, concat_sym, malp_core_concat);
 }
 
 DEF_BUILTIN_FN(malp_core_numberQUESTION)(obj args, int *err)
@@ -600,6 +600,7 @@ static obj concat_helper_cons(obj pre, obj post)
 
 DEF_BUILTIN_FN(malp_core_concat)(obj args, int *err)
 {
+	if (empty_list == args) return args;
 	obj first = LIST_FIRST(args);
 	if (first->type != List &&
 		first->type != Vector &&
@@ -607,7 +608,6 @@ DEF_BUILTIN_FN(malp_core_concat)(obj args, int *err)
 		*err = InvalidArgumentError;
 		return NULL;
 	}
-	if (empty_list == args) return args;
 	if (args->list.count == 1) return first;
 	args = malp_core_concat_(args->list.rest, err);
 	if (*err) return NULL;

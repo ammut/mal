@@ -25,6 +25,12 @@ enum errors {
 
 void core_load_vars(obj env);
 
+obj cons_sym;
+
+obj concat_sym;
+
+obj quote_sym;
+
 obj malp_core_numberQUESTION;
 
 obj malp_core_PLUS;

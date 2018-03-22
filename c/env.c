@@ -65,7 +65,8 @@ void env_bind_args(obj env, obj binds, obj exprs, int *err)
 				env_set(
 					env,
 					LIST_SECOND(binds),
-					exprs == empty_list ? nil_o : exprs
+//					exprs == empty_list ? nil_o : exprs // should be nil, empty_list for mal compliance
+					exprs
 				);
 			}
 			return;

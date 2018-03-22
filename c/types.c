@@ -421,6 +421,7 @@ obj new_fn(obj ast, obj env, obj binds)
 	obj r = malloc(ALIGN_OBJ(sizeof(malp_fn)));
 	if (r == NULL) return r;
 	r->type = Fn;
+	r->fn.is_macro = 0;
 	r->fn.ast = ast;
 	r->fn.env = env;
 	r->fn.binds = binds;

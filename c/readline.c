@@ -26,6 +26,8 @@ static char *next_symbol_like(const char *text, int state)
 		"let*",
 		"do",
 		"if",
+		"defmacro!",
+		"macroexpand",
 	};
 
 	if (!state) {
@@ -78,5 +80,7 @@ void init_readline(obj env) {
 	completion_env = env;
 	rl_initialize();
 	rl_attempted_completion_function = do_autocomplete;
+	rl_completer_word_break_characters = "(){}[]' ";
+	rl_completer_quote_characters = "\"";
 }
 

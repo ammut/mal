@@ -48,6 +48,7 @@ void core_load_vars(obj env)
 	env_set(env, new_symbol("rest", STRLEN_STATIC("rest")), malp_core_rest);
 	env_set(env, cons_sym, malp_core_cons);
 	env_set(env, concat_sym, malp_core_concat);
+	env_set(env, new_symbol("nth", STRLEN_STATIC("nth")), malp_core_nth);
 }
 
 DEF_BUILTIN_FN(malp_core_numberQUESTION)(obj args, int *err)
@@ -554,11 +555,12 @@ DEF_BUILTIN_FN(malp_core_first)(obj args, int *err)
 	args = LIST_FIRST(args);
 	if (args->type != List &&
 		args->type != Vector &&
-		args->type != HashMap) {
+		args->type != HashMap &&
+		args->type != Nil) {
 		*err = InvalidArgumentError;
 		return NULL;
 	}
-	return args == empty_list ?
+	return args == empty_list || args == nil_o ?
 		   nil_o :
 		   args->list.first;
 }
@@ -568,13 +570,14 @@ DEF_BUILTIN_FN(malp_core_rest)(obj args, int *err)
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	args = LIST_FIRST(args);
 	if (args->type != List &&
+		args->type != Nil &&
 		args->type != Vector &&
 		args->type != HashMap) {
 		*err = InvalidArgumentError;
 		return NULL;
 	}
-	return args == empty_list ?
-		   args :
+	return args == nil_o || args == empty_list ?
+		   empty_list :
 		   args->list.rest;
 }
 
@@ -612,4 +615,24 @@ DEF_BUILTIN_FN(malp_core_concat)(obj args, int *err)
 	args = malp_core_concat_(args->list.rest, err);
 	if (*err) return NULL;
 	return concat_helper_cons(first, args);
+}
+
+DEF_BUILTIN_FN(malp_core_nth)(obj args, int *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count != 2, *err);
+	obj list = LIST_FIRST(args);
+	args = LIST_SECOND(args);
+	if (list->type != List || !is_number(args)) {
+		*err = InvalidArgumentError;
+		return NULL;
+	}
+	if (0 > args->integer.value || list->list.count <= (malp_denom_t)args->integer.value) {
+		*err = IndexOutOfBoundsError;
+		return NULL;
+	}
+	malp_int_t nth = (malp_int_t)NUMBER_VALUE(args);
+	while (nth--) {
+		list = list->list.rest;
+	}
+	return LIST_FIRST(list);
 }

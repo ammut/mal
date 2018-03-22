@@ -21,6 +21,7 @@ enum errors {
 	NotCallableError,
 	KeyboardInterrupt,
 	IOError,
+	IndexOutOfBoundsError,
 };
 
 void core_load_vars(obj env);
@@ -30,6 +31,12 @@ obj cons_sym;
 obj concat_sym;
 
 obj quote_sym;
+
+obj STAR1_sym;
+
+obj STAR2_sym;
+
+obj STAR3_sym;
 
 obj malp_core_numberQUESTION;
 
@@ -90,6 +97,8 @@ obj malp_core_rest;
 obj malp_core_cons;
 
 obj malp_core_concat;
+
+obj malp_core_nth;
 
 #if 0
 

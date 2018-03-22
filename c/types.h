@@ -222,6 +222,7 @@ typedef struct malp_builtin_fn {
 
 typedef struct malp_fn {
 	malp_type type;
+	unsigned char is_macro;
 	obj ast;
 	obj env;
 	obj binds;

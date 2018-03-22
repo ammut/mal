@@ -7,6 +7,17 @@
 #include "reader.h"
 #include "core.h"
 
+struct line_list_element {
+	char *line;
+	struct line_list_element *next;
+};
+
+struct line_list {
+	char *line;
+	struct line_list_element *next;
+
+};
+
 typedef struct reader {
 	unsigned position;
 	char **tokens;
@@ -22,8 +33,8 @@ static obj read_macro_quasiquote(reader_s*);
 static obj read_macro_unquote(reader_s*);
 static obj read_macro_deref(reader_s*);
 
-static char **tokenize(char*);
-static char **validate_tokens(char **tokens);
+static char **tokenize(char *in);
+static char **validate_nesting(char **tokens);
 
 static size_t get_token_type(char *in);
 static size_t skip_whitespace(char *in);
@@ -48,7 +59,7 @@ obj read_str(char *in)
 {
 	char **tokens = tokenize(in);
 	if (tokens == NULL) return NULL; // todo: crash horribly
-	char **error = validate_tokens(tokens);
+	char **error = validate_nesting(tokens);
 	if (error) {
 		if (*error == NULL)
 			fprintf(stderr, "Unexpected end of input\n");
@@ -216,7 +227,7 @@ static obj read_macro_deref(reader_s *r)
  * free(*tokens); free(tokens);
  * </pre>
  */
-static char **tokenize(char* in)
+static char **tokenize(char *in)
 {
 	size_t in_len = strlen(in);
 	size_t buff_pos = 0;
@@ -281,6 +292,33 @@ static size_t skip_whitespace(char *in)
 		c = in[++r];
 	}
 	return r;
+}
+
+static size_t string_is_number(char *in, int* err)
+{
+	int parsed_chars;
+	malp_int_t i;
+	if (sscanf(in, "%" PRId64 "%n", &i, &parsed_chars)) {
+		if (!is_other(in[parsed_chars])) {
+			return (size_t)parsed_chars;
+		}
+		int denom_len;
+		if (in[parsed_chars] == '/' &&
+			sscanf(in , "%" PRId64 "%n", &i, &denom_len) &&
+			!is_other(in[parsed_chars + 1 + denom_len])) {
+
+			if (i == 0) {
+				*err = ReaderError; // todo: actual error code, division by zero
+			}
+			return (size_t)parsed_chars + 1 + denom_len;
+		}
+	}
+	malp_real_t r;
+	if (sscanf(in, "%lf%n", &r, &parsed_chars) && !is_other(in[parsed_chars])) {
+		return (size_t)parsed_chars;
+	}
+	*err = ReaderError; // todo: actual error codes
+	return 0;
 }
 
 static size_t tokenize_next(char* in, int *err)
@@ -352,36 +390,8 @@ tokenize_next_comment:
 	goto tokenize_next_exit;
 
 tokenize_next_other:
-	{
-		int num_len;
-		malp_int_t i;
-		malp_real_t r;
-		if (sscanf(in, "%" PRId64 "%n", &i, &num_len)) {
-			if (!is_other(in[num_len])) {
-				pos = (size_t)num_len;
-				goto tokenize_next_exit;
-			}
-			int denom_len;
-			if (in[num_len] == '/' &&
-				sscanf(in , "%" PRId64 "%n", &i, &denom_len) &&
-				!is_other(in[num_len + 1 + denom_len])) {
-
-				if (i == 0) {
-					*err = ReaderError; // todo: actual error code
-				}
-				pos = (size_t)num_len + 1 + denom_len;
-				goto tokenize_next_exit;
-			}
-		}
-		if (sscanf(in, "%lf%n", &r, &num_len)) {
-
-			pos = (size_t)num_len;
-			if (is_other(in[num_len])) {
-				*err = ReaderError; // todo: actual error codes
-			}
-			goto tokenize_next_exit;
-		}
-	}
+	if ((pos = string_is_number(in, err)))
+		goto tokenize_next_exit;
 	char c = in[pos];
 	while (is_other(c)) {
 		c = in[++pos];
@@ -420,7 +430,8 @@ static size_t get_token_type(char* in)
 		default:
 			break;
 	}
-	if ((in[0] == '-' && in[1] != 0) || (in[0] >= '0' && in[0] <= '9'))
+	int err;
+	if (string_is_number(in, &err))
 		return number_token;
 	return other_token;
 }
@@ -448,7 +459,7 @@ size_t find_matching_brackets(char **tokens, int *err)
 	return i;
 }
 
-static char **validate_tokens(char **tokens)
+static char **validate_nesting(char **tokens)
 {
 	size_t i = 0;
 	int err = 0;

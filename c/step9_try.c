@@ -10,56 +10,60 @@
 #include "env.h"
 #include "readline.h"
 #include "core.h"
+#include "main.h"
 
-void print_malp_error(int error_type)
+void print_malp_error(obj err)
 {
-	if (error_type) {
-		char buf[32];
+	if (err) {
 		char *msg;
-		switch (error_type) {
+		switch (err->error.error_type) {
 			case ArityError:
-				msg = "Wrong number of args passed";
+				msg = "ArityException";
 				break;
 			case InvalidArgumentError:
-				msg = "Invalid argument";
+				msg = "InvalidArgumentException";
 				break;
 			case ReaderError:
-				msg = "Could not parse";
+				msg = "ReaderException";
 				break;
 			case SymbolNotFoundError:
-				msg = "Unable to resolve symbol";
+				msg = "SymbolNotFoundException";
 				break;
 			case NotCallableError:
-				msg = "Object is not callable";
+				msg = "NotCallableException";
 				break;
 			case IOError:
-				msg = "I/O Error";
+				msg = "IOException";
 				break;
 			case IndexOutOfBoundsError:
-				msg = "Index out of bounds";
+				msg = "IndexOutOfBoundsException";
 				break;
+			case BaseError:
 			default:
-				sprintf(buf, "Unknown error type: %d", error_type);
-				msg = buf;
+				msg = "Exception";
 				break;
 		}
-		error(0, 0, "Uncaught error: %s", msg);
+		err = pr_str(err, 0);
+		error(0, 0, "Uncaught %s: %s", msg, err->string.value);
 	}
 }
 
 obj READ(char *in) {
-	obj r = read_str(in);
-	return r;
+	return read_str(in);
 }
 
-obj EVAL(obj ast, obj env, int *err);
 
-obj eval_ast(obj ast, obj env, int *err)
+obj eval_ast(obj ast, obj env, obj *err)
 {
 	switch (ast->type) {
 		case Symbol: {
 			obj value = env_get(env, ast);
-			if (NULL == value) *err = SymbolNotFoundError; // todo
+			if (NULL == value) {
+				char fmt[] = "Unable to resolve symbol \"%s\" in this context";
+				obj msg = new_empty_string(sizeof(fmt) + strlen(ast->symbol.name));
+				sprintf(msg->string.value, fmt, ast->symbol.name);
+				*err = new_error(SymbolNotFoundError, msg); // todo
+			}
 			return value;
 		}
 		case List: {
@@ -83,9 +87,16 @@ obj eval_ast(obj ast, obj env, int *err)
 	}
 }
 
+// IS_PAIR == non-empty list
 #define IS_PAIR(ast) ((ast)->type == List && (ast) != empty_list)
 
-obj quasiquote(obj ast, int*err)
+/**
+ * ast is never empty_list
+ * @param ast
+ * @param err
+ * @return
+ */
+obj quasiquote(obj ast, obj *err)
 {
 	if (!IS_PAIR(ast)) {
 		return cons(cons(empty_list, ast), quote_sym);
@@ -94,7 +105,7 @@ obj quasiquote(obj ast, int*err)
 	obj first = LIST_FIRST(ast);
 	if (OBJ_IS_SYMBOL(first, "unquote")) {
 		if (first->list.count < 2) {
-			*err = InvalidArgumentError;
+			*err = new_arity_error(first->list.count - 1, "unquote");
 			return NULL;
 		}
 		return LIST_SECOND(ast);
@@ -102,7 +113,7 @@ obj quasiquote(obj ast, int*err)
 	if (IS_PAIR(first)
 		&& OBJ_IS_SYMBOL(LIST_FIRST(first), "splice-unquote")) {
 		if (first->list.count < 2) {
-			*err = InvalidArgumentError;
+			*err = new_arity_error(first->list.count - 1, "splice-unquote");
 			return NULL;
 		}
 		return cons(cons(cons(empty_list, quasiquote(ast->list.rest, err)), LIST_SECOND(first)), concat_sym);
@@ -114,16 +125,20 @@ int is_macro_call(obj ast, obj env)
 {
 	return ast->type == List
 		   && ast->list.count > 0
-		   && (ast = env_get(env, LIST_FIRST(ast))) != NULL
+		   && ((LIST_FIRST(ast)->type == Symbol
+				&& (ast = env_get(env, LIST_FIRST(ast))) != NULL)
+			   || (ast = LIST_FIRST(ast)))
 		   && ast->type == Fn
 		   && ast->fn.is_macro;
 }
 
-obj macroexpand(obj ast, obj env, int *err)
+obj macroexpand(obj ast, obj env, obj *err)
 {
 	while (is_macro_call(ast, env)) {
-		obj macro = env_get(env, LIST_FIRST(ast));
-		obj env = new_env((unsigned) macro->fn.binds->list.count, macro->fn.env);
+		obj macro = LIST_FIRST(ast)->type == Symbol ?
+					env_get(env, LIST_FIRST(ast)) :
+					LIST_FIRST(ast);
+		env = new_env((unsigned) macro->fn.binds->list.count, macro->fn.env);
 		env_bind_args(env, macro->fn.binds, ast->list.rest, err);
 		if (*err) return NULL;
 		ast = EVAL(macro->fn.ast, env, err);
@@ -131,161 +146,175 @@ obj macroexpand(obj ast, obj env, int *err)
 	return ast;
 }
 
-obj EVAL(obj ast, obj env, int *err) {
+obj EVAL(obj ast, obj env, obj *err) {
 eval_start:
 	if (ast == NULL) return ast; // todo remove once reader is complete
+	if (ast->type != List) {
+		return eval_ast(ast, env, err);
+	}
 	if (ast == empty_list) {
 		return ast;
-	} else if (ast->type == List) {
-		ast = macroexpand(ast, env, err);
-		if (*err) return ast;
-		obj first = ast->list.first;
+	}
+	ast = macroexpand(ast, env, err);
+	if (*err) return ast;
 
-		if (ast->type != List) return eval_ast(ast, env, err);
-		if (OBJ_IS_SYMBOL(first, "def!")) {
-			if (ast->list.count != 3) {
-				*err = ArityError; // todo
-				return NULL;
-			}
-			obj symbol = LIST_FIRST(ast->list.rest);
-			if (symbol->type != Symbol) {
-				*err = InvalidArgumentError; // todo
-				return NULL;
-			}
-			obj value = EVAL(LIST_SECOND(ast->list.rest), env, err);
-			if (*err) return NULL;
-			env_set(env, symbol, value);
-			return value;
+	if (ast->type != List) return eval_ast(ast, env, err);
 
-		} else if (OBJ_IS_SYMBOL(first, "let*")) {
-			if (ast->list.count != 3) {
-				*err = ArityError; // todo
-				return NULL;
-			}
-			obj bindings = LIST_FIRST(ast->list.rest);
-			obj result = LIST_SECOND(ast->list.rest);
-			if (List != bindings->type) {
-				*err = InvalidArgumentError; // todo
-				return NULL;
-			}
-			if (bindings->list.count % 2 != 0) {
-				*err = ArityError; // todo
-				return NULL;
-			}
-			obj let_env = new_env((unsigned)bindings->list.count / 2, env);
-			while (empty_list != bindings) {
-				if (LIST_FIRST(bindings)->type != Symbol) {
-					*err = InvalidArgumentError; // todo
-					return NULL;
-				}
-				env_set(let_env, LIST_FIRST(bindings), EVAL(LIST_SECOND(bindings), let_env, err));
-				if (*err) return NULL;
-
-				bindings = bindings->list.rest->list.rest;
-			}
-			ast = result;
-			env = let_env;
-			goto eval_start;
-
-		} else if (OBJ_IS_SYMBOL(first, "fn*")) {
-			return new_fn(
-				LIST_SECOND(ast->list.rest),
-				env,
-				LIST_FIRST(ast->list.rest)
-			); // todo: (every? symbol? binds)
-
-		} else if (OBJ_IS_SYMBOL(first, "if")) {
-			if (ast->list.count != 4 && ast->list.count != 3) {
-				*err = ArityError;
-				return NULL;
-			}
-			obj results = ast->list.rest->list.rest;
-			if (is_truthy(EVAL(LIST_SECOND(ast), env, err))) {
-				ast = LIST_FIRST(results);
-			} else {
-				ast = LIST_SECOND(results);
-				if (NULL == ast) return nil_o;
-			}
-			goto eval_start;
-
-		} else if (OBJ_IS_SYMBOL(first, "do")) {
-			ast = ast->list.rest;
-			if (empty_list == ast) return nil_o;
-			while (empty_list != ast->list.rest && !*err) {
-				EVAL(LIST_FIRST(ast), env, err);
-
-				ast = ast->list.rest;
-			}
-			if (*err) return NULL;
-			ast = LIST_FIRST(ast);
-			goto eval_start;
-
-		} else if (OBJ_IS_SYMBOL(first, "quote")) {
-			if (ast->list.count != 2) {
-				*err = ArityError;
-				return NULL;
-			}
-			return LIST_SECOND(ast);
-
-		} else if (OBJ_IS_SYMBOL(first, "quasiquote")) {
-			if (ast->list.count != 2) {
-				*err = ArityError;
-				return NULL;
-			}
-			ast = quasiquote(LIST_SECOND(ast), err);
-			if (*err) return ast;
-			goto eval_start;
-
-		} else if (OBJ_IS_SYMBOL(first, "defmacro!")) {
-			ast = ast->list.rest;
-			if (ast->list.count != 2) {
-				*err = ArityError; // todo
-				return NULL;
-			}
-			obj symbol = LIST_FIRST(ast);
-			if (symbol->type != Symbol) {
-				*err = InvalidArgumentError; // todo
-				return NULL;
-			}
-			obj value = EVAL(LIST_SECOND(ast), env, err);
-			if (*err) return NULL;
-			if (value->type != Fn) {
-				*err = InvalidArgumentError;
-				return NULL;
-			}
-			value->fn.is_macro = 1;
-			env_set(env, symbol, value);
-			return value;
-
-		} else if (OBJ_IS_SYMBOL(first, "macroexpand")) {
-			return macroexpand(LIST_SECOND(ast), env, err);
-
-		} else {
-			ast = eval_ast(ast, env, err);
-			if (*err) return NULL;
-			first = ast->list.first;
-			obj rest = ast->list.rest;
-
-			if (first->type == BuiltinFn) {
-				return first->builtin_fn.fn(rest, err);
-			} else if (first->type == Fn) {
-				env = new_env((unsigned) first->fn.binds->list.count, first->fn.env);
-				env_bind_args(env, first->fn.binds, rest, err);
-				if (*err) return NULL;
-				ast = first->fn.ast;
-				goto eval_start;
-			} else if (first->type == Keyword) {
-				return NULL; // todo
-			} else if (first->type == HashMap) {
-				return NULL; // todo
-			} else {
-				*err = NotCallableError;
-				return NULL;
-			}
+	obj first = ast->list.first;
+#define DEF_SYMBOL "def!"
+	if (OBJ_IS_SYMBOL(first, DEF_SYMBOL)) {
+		if (ast->list.count != 3) {
+			*err = new_arity_error(ast->list.count - 1, DEF_SYMBOL); // todo
+			return NULL;
 		}
+		obj symbol = LIST_FIRST(ast->list.rest);
+		if (symbol->type != Symbol) {
+			*err = new_wrong_arg_type_error(1, symbol->type, Symbol, DEF_SYMBOL); // todo
+			return NULL;
+		}
+		obj value = EVAL(LIST_SECOND(ast->list.rest), env, err);
+		if (*err) return NULL;
+		env_set(env, symbol, value);
+		return value;
+
+#define LET_SYMBOL "let*"
+	} else if (OBJ_IS_SYMBOL(first, LET_SYMBOL)) {
+		if (ast->list.count != 3) {
+			*err = new_arity_error(ast->list.count, LET_SYMBOL); // todo
+			return NULL;
+		}
+		obj bindings = LIST_FIRST(ast->list.rest);
+		obj result = LIST_SECOND(ast->list.rest);
+		if (List != bindings->type) {
+			*err = new_message_error(InvalidArgumentError, LET_SYMBOL " requires a vector for its bindings"); // todo
+			return NULL;
+		}
+		if (bindings->list.count % 2 != 0) {
+			*err = new_message_error(InvalidArgumentError, LET_SYMBOL " requires an even number of forms in binding vector"); // todo
+			return NULL;
+		}
+		obj let_env = new_env((unsigned)bindings->list.count / 2, env);
+		while (empty_list != bindings) {
+			if (LIST_FIRST(bindings)->type != Symbol) {
+				obj msg = pr_str(LIST_FIRST(bindings), 0);
+				*err = new_format_error(InvalidArgumentError, "Unsupported binding form: %s", msg->string.value); // todo
+				return NULL;
+			}
+			env_set(let_env, LIST_FIRST(bindings), EVAL(LIST_SECOND(bindings), let_env, err));
+			if (*err) return NULL;
+
+			bindings = bindings->list.rest->list.rest;
+		}
+		ast = result;
+		env = let_env;
+		goto eval_start;
+
+	} else if (OBJ_IS_SYMBOL(first, "fn*")) {
+		return new_fn(
+			LIST_SECOND(ast->list.rest),
+			env,
+			LIST_FIRST(ast->list.rest)
+		); // todo: (every? symbol? binds)
+
+	} else if (OBJ_IS_SYMBOL(first, "if")) {
+		if (ast->list.count != 4 && ast->list.count != 3) {
+			*err = new_arity_error(ast->list.count - 1, "if");
+			return NULL;
+		}
+		obj results = ast->list.rest->list.rest;
+		if (is_truthy(EVAL(LIST_SECOND(ast), env, err))) {
+			ast = LIST_FIRST(results);
+		} else {
+			ast = LIST_SECOND(results);
+			if (NULL == ast) return nil_o;
+		}
+		goto eval_start;
+
+	} else if (OBJ_IS_SYMBOL(first, "do")) {
+		ast = ast->list.rest;
+		if (empty_list == ast) return nil_o;
+		while (empty_list != ast->list.rest && !*err) {
+			EVAL(LIST_FIRST(ast), env, err);
+
+			ast = ast->list.rest;
+		}
+		if (*err) return NULL;
+		ast = LIST_FIRST(ast);
+		goto eval_start;
+
+	} else if (OBJ_IS_SYMBOL(first, "quote")) {
+		if (ast->list.count != 2) {
+			*err = new_arity_error(ast->list.count - 1, "quote");
+			return NULL;
+		}
+		return LIST_SECOND(ast);
+
+	} else if (OBJ_IS_SYMBOL(first, "quasiquote")) {
+		if (ast->list.count != 2) {
+			*err = new_arity_error(ast->list.count - 1, "quasiquote");
+			return NULL;
+		}
+		ast = quasiquote(LIST_SECOND(ast), err);
+		if (*err) return ast;
+		goto eval_start;
+
+	} else if (OBJ_IS_SYMBOL(first, "defmacro!")) {
+		ast = ast->list.rest;
+		if (ast->list.count != 2) {
+			*err = new_arity_error(ast->list.count - 1, "defmacro!");
+			return NULL;
+		}
+		obj symbol = LIST_FIRST(ast);
+		if (symbol->type != Symbol) {
+			*err = new_wrong_arg_type_error(1, symbol->type, Symbol, "defmacro!"); // todo
+			return NULL;
+		}
+		obj value = EVAL(LIST_SECOND(ast), env, err);
+		if (*err) return NULL;
+		if (value->type == Fn) {
+			value->fn.is_macro = 1;
+		}
+		env_set(env, symbol, value);
+		return value;
+
+	} else if (OBJ_IS_SYMBOL(first, "macroexpand")) {
+		return macroexpand(LIST_SECOND(ast), env, err);
+
+	} else if (OBJ_IS_SYMBOL(first, "try*")) {
+		obj catch;
+		if (ast->list.count != 3 ||
+			(catch = ast->list.rest->list.first)->type != List ||
+			catch->list.count != 3 ||
+			!OBJ_IS_SYMBOL(LIST_FIRST(catch), "catch*") ||
+			LIST_SECOND(catch)->type != Symbol) {
+
+			*err = new_message_error(BaseError, "try*: something is not quite right yet"); // todo
+			return NULL;
+		}
+		ast = EVAL(LIST_SECOND(ast), env, err);
+		if (!*err) return ast;
+		catch = catch->list.rest;
+		obj let_env = new_env(1, env);
+		env_set(let_env, LIST_FIRST(catch), *err);
+
+		ast = LIST_SECOND(catch);
+		env = let_env;
+		goto eval_start;
 
 	} else {
-		return eval_ast(ast, env, err);
+		ast = eval_ast(ast, env, err);
+		if (*err) return NULL;
+		first = ast->list.first;
+		obj rest = ast->list.rest;
+
+		if (first->type == Fn) {
+			env = new_env((unsigned) first->fn.binds->list.count, first->fn.env);
+			env_bind_args(env, first->fn.binds, rest, err);
+			if (*err) return NULL;
+			ast = first->fn.ast;
+			goto eval_start;
+		}
+		return invoke_form(ast, env, err);
 	}
 }
 
@@ -297,7 +326,7 @@ void rep(char *in, obj env) {
 	obj ast = READ(in);
 	free(in);
 	if (!ast) return;
-	int err = 0;
+	obj err = NULL;
 	ast = EVAL(ast, env, &err);
 	print_malp_error(err);
 	if (!ast) return;
@@ -311,17 +340,17 @@ void rep(char *in, obj env) {
 	PRINT(ast);
 }
 
-static int *err_marker;
+static obj *err_marker;
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 void keyboard_interrupt(int _)
 {
-	*err_marker = KeyboardInterrupt;
+	*err_marker = new_error(KeyboardInterrupt, NULL);
 }
 #pragma GCC diagnostic pop
 
-DEF_BUILTIN_FN(malp_core_eval)(obj ast, int *err)
+DEF_BUILTIN_FN(malp_core_eval)(obj ast, obj *err)
 {
 	static obj env;
 	if (NULL == env) {
@@ -354,35 +383,32 @@ int main(int argc, char **argv) {
 	}
 
 	for (int i = argc - 1; i >= arg_start; --i) {
-		ARGV = cons(ARGV, new_string(
-			argv[i],
-			strlen(argv[i])
-		));
+		ARGV = cons(ARGV, new_string(argv[i]));
 	}
 
-	cons_sym = new_symbol("cons", 4);
-	quote_sym = new_symbol("quote", 5);
-	concat_sym = new_symbol("concat", 6);
-	STAR1_sym = new_symbol("*1", 2);
-	STAR2_sym = new_symbol("*2", 2);
-	STAR3_sym = new_symbol("*3", 2);
+	cons_sym = new_symbol("cons");
+	quote_sym = new_symbol("quote");
+	concat_sym = new_symbol("concat");
+	STAR1_sym = new_symbol("*1");
+	STAR2_sym = new_symbol("*2");
+	STAR3_sym = new_symbol("*3");
 
 	obj repl_env = new_env(64, NULL);
 	init_readline(repl_env);
 
 	core_load_vars(repl_env);
 
-	env_set(repl_env, new_symbol("*ARGV*", 6), ARGV);
-	env_set(repl_env, new_symbol("eval", 4), malp_core_eval);
+	env_set(repl_env, new_symbol("*ARGV*"), ARGV);
+	env_set(repl_env, new_symbol("eval"), malp_core_eval);
 	malp_core_eval_(repl_env, NULL);
-	empty_list_str = new_string("()", 2);
-	empty_string = new_string("", 0);
-	fn_str = new_string("#(...)", 6);
-	nil_str = new_string("nil", 3);
-	true_str = new_string("true", 4);
-	false_str = new_string("false", 5);
+	empty_list_str = new_string("()");
+	empty_string = new_string("");
+	fn_str = new_string("#(...)");
+	nil_str = new_string("nil");
+	true_str = new_string("true");
+	false_str = new_string("false");
 
-	int error_flag = 0;
+	obj error_flag = NULL;
 	EVAL(READ("(def! not (fn* (a) (if a false true)))"), repl_env, &error_flag);
 	EVAL(READ("(def! load-file (fn* (f) (eval (read-string (str \"(do \" (slurp f) \")\")))))"), repl_env, &error_flag);
 	EVAL(READ("(def! inc (fn* (n) (+ n 1)))"), repl_env, &error_flag);
@@ -393,11 +419,8 @@ int main(int argc, char **argv) {
 	err_marker = &error_flag;
 
 	if (NULL != run_file_name) {
-		ARGV = cons(ARGV, new_string(
-			run_file_name,
-			strlen(run_file_name)
-		));
-		env_set(repl_env, new_symbol("*ARGV*", 6), ARGV);
+		ARGV = cons(ARGV, new_string(run_file_name));
+		env_set(repl_env, new_symbol("*ARGV*"), ARGV);
 		EVAL(READ("(load-file (first *ARGV*))"), repl_env, &error_flag);
 		print_malp_error(error_flag);
 

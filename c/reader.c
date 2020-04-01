@@ -170,7 +170,7 @@ static obj read_atom(reader_s *r)
 			if (strcmp(token, "true") == 0) return true_o;
 			if (strcmp(token, "false") == 0) return false_o;
 			if (strcmp(token, "nil") == 0) return nil_o;
-			return new_symbol(token, len);
+			return new_symbol(token);
 	}
 	return NULL;
 }
@@ -181,7 +181,7 @@ static obj read_macro_quote(reader_s *r)
 	if (NULL == peek(r)) return NULL; // todo: crash horribly until we have better error handling
 
 	char symbol[] = "quote";
-	return cons(cons(empty_list, read_form(r)), new_symbol(symbol, STRLEN_STATIC(symbol)));
+	return cons(cons(empty_list, read_form(r)), new_symbol(symbol));
 }
 
 static obj read_macro_quasiquote(reader_s *r)
@@ -190,7 +190,7 @@ static obj read_macro_quasiquote(reader_s *r)
 	if (NULL == peek(r)) return NULL; // todo: crash horribly until we have better error handling
 
 	char symbol[] = "quasiquote";
-	return cons(cons(empty_list, read_form(r)), new_symbol(symbol, STRLEN_STATIC(symbol)));
+	return cons(cons(empty_list, read_form(r)), new_symbol(symbol));
 }
 
 static obj read_macro_unquote(reader_s *r)
@@ -200,10 +200,10 @@ static obj read_macro_unquote(reader_s *r)
 
 	if ('@' == macro[1]) {
 		char symbol[] = "splice-unquote";
-		return cons(cons(empty_list, read_form(r)), new_symbol(symbol, STRLEN_STATIC(symbol)));
+		return cons(cons(empty_list, read_form(r)), new_symbol(symbol));
 	} else {
 		char symbol[] = "unquote";
-		return cons(cons(empty_list, read_form(r)), new_symbol(symbol, STRLEN_STATIC(symbol)));
+		return cons(cons(empty_list, read_form(r)), new_symbol(symbol));
 	}
 }
 
@@ -213,7 +213,7 @@ static obj read_macro_deref(reader_s *r)
 	if (NULL == peek(r)) return NULL; // todo: crash horribly until we have better error handling
 
 	char symbol[] = "deref";
-	return cons(cons(empty_list, read_form(r)), new_symbol(symbol, STRLEN_STATIC(symbol)));
+	return cons(cons(empty_list, read_form(r)), new_symbol(symbol));
 }
 
 

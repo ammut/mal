@@ -57,8 +57,9 @@ obj env_get(obj env, obj symbol)
 	return NULL;
 }
 
-void env_bind_args(obj env, obj binds, obj exprs, int *err)
+void env_bind_args(obj env, obj binds, obj exprs, obj *err)
 {
+	size_t passed = exprs->list.count;
 	while (empty_list != binds) {
 		if (OBJ_IS_SYMBOL(LIST_FIRST(binds), "&")) {
 			if (LIST_SECOND(binds)) {
@@ -72,7 +73,7 @@ void env_bind_args(obj env, obj binds, obj exprs, int *err)
 			return;
 		}
 		if (empty_list == exprs) {
-			*err = ArityError;
+			*err = new_arity_error(passed, "");
 			return;
 		}
 		env_set(env, LIST_FIRST(binds), LIST_FIRST(exprs));

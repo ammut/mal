@@ -53,6 +53,8 @@ obj cons(obj list, obj element) __attribute_warn_unused_result__;
 
 obj new_list();
 
+obj new_list_from(size_t count, ...);
+
 /*
  * returns a pointer to the newly inserted obj.
  *
@@ -64,6 +66,10 @@ void set_length_mutating(obj list, size_t count);
 
 #define LIST_FIRST(l) ((l)->list.first)
 #define LIST_SECOND(l) ((l)->list.rest->list.first)
+
+#define COLL_FIRST(c) ((c)->type == List ? LIST_FIRST(c) : NULL)
+
+obj coll_last(obj collection);
 
 #define MAP_FROM_TO(f, t) \
 do { \
@@ -129,7 +135,7 @@ typedef struct malp_symbol {
 	char name[];
 } malp_symbol;
 
-obj new_symbol(char *token, size_t length);
+obj new_symbol(char *token);
 
 #define SYMBOL_IS(sym, str) (0 == strcmp(sym->symbol.name, str))
 
@@ -185,7 +191,7 @@ typedef struct malp_string {
 
 obj new_empty_string(size_t len);
 
-obj new_string(char *token, size_t len);
+obj new_string(char *token);
 
 obj read_string(char *token, size_t len);
 
@@ -217,7 +223,7 @@ typedef obj (*malp_callable)(obj args, int *err);
 
 typedef struct malp_builtin_fn {
 	malp_type type;
-	obj (*fn)(obj args, int *err);
+	obj (*fn)(obj args, obj *err);
 } malp_builtin_fn;
 
 typedef struct malp_fn {
@@ -231,6 +237,8 @@ typedef struct malp_fn {
 obj new_fn(obj ast, obj env, obj binds);
 
 obj fn_str;
+
+obj invoke_form(obj form, obj env, obj *err);
 
 // ENV
 
@@ -258,8 +266,30 @@ obj new_env(unsigned size, obj outer);
 typedef struct malp_error {
 	malp_type type;
 	int error_type;
-	char *message;
+	obj error;
 } malp_error;
+
+enum errors {
+	BaseError = 1,
+	ArityError,
+	InvalidArgumentError,
+	ReaderError,
+	SymbolNotFoundError,
+	NotCallableError,
+	KeyboardInterrupt,
+	IOError,
+	IndexOutOfBoundsError,
+};
+
+obj new_error(int type, obj content);
+
+obj new_message_error(int type, char *message);
+
+obj new_arity_error(size_t passed, char *to);
+
+obj new_wrong_arg_type_error(size_t argno, int got, int want, char *passed_to);
+
+obj new_format_error(int type, char *format, char *value);
 
 // OBJECT
 
@@ -283,8 +313,9 @@ typedef union obj_s {
 	malp_atom atom;
 	malp_builtin_fn builtin_fn;
 	malp_fn fn;
-	malp_env env;
 	malp_error error;
+
+	malp_env env;
 	malp_fwd forward;
 } obj_s;
 

@@ -6,23 +6,12 @@
 #include "types.h"
 
 #define DEF_BUILTIN_FN(name) \
-static obj name##_(obj, int*); \
+static obj name##_(obj, obj*); \
 obj name = (obj)&(malp_builtin_fn){ \
 	.type = BuiltinFn, \
 	.fn = name##_, \
 }; \
 static obj name##_
-
-enum errors {
-	ArityError = 1,
-	InvalidArgumentError,
-	ReaderError,
-	SymbolNotFoundError,
-	NotCallableError,
-	KeyboardInterrupt,
-	IOError,
-	IndexOutOfBoundsError,
-};
 
 void core_load_vars(obj env);
 
@@ -99,6 +88,18 @@ obj malp_core_cons;
 obj malp_core_concat;
 
 obj malp_core_nth;
+
+obj malp_core_apply;
+
+obj malp_core_map;
+
+obj malp_core_nilQUESTION;
+
+obj malp_core_trueQUESTION;
+
+obj malp_core_falseQUESTION;
+
+obj malp_core_symbolQUESTION;
 
 #if 0
 

@@ -5,7 +5,6 @@
 #include "types.h"
 #include "math.h"
 #include "env.h"
-#include "main.h"
 #include "core.h"
 #include "printer.h"
 #include "reader.h"
@@ -18,40 +17,40 @@
 
 void core_load_vars(obj env)
 {
-	env_set(env, new_symbol("+", STRLEN_STATIC("+")), malp_core_PLUS);
-	env_set(env, new_symbol("-", STRLEN_STATIC("-")), malp_core_MINUS);
-	env_set(env, new_symbol("*", STRLEN_STATIC("*")), malp_core_STAR);
-	env_set(env, new_symbol("/", STRLEN_STATIC("/")), malp_core_SLASH);
-	env_set(env, new_symbol("number?", STRLEN_STATIC("number?")), malp_core_numberQUESTION);
-	env_set(env, new_symbol("pr-str", STRLEN_STATIC("pr-str")), malp_core_prMINUSstr);
-	env_set(env, new_symbol("str", STRLEN_STATIC("str")), malp_core_str);
-	env_set(env, new_symbol("prn", STRLEN_STATIC("prn")), malp_core_prn);
-	env_set(env, new_symbol("print", STRLEN_STATIC("print")), malp_core_print);
-	env_set(env, new_symbol("println", STRLEN_STATIC("println")), malp_core_println);
-	env_set(env, new_symbol("list", STRLEN_STATIC("list")), malp_core_list);
-	env_set(env, new_symbol("list?", STRLEN_STATIC("list?")), malp_core_listQUESTION);
-	env_set(env, new_symbol("empty?", STRLEN_STATIC("empty?")), malp_core_emptyQUESTION);
-	env_set(env, new_symbol("count", STRLEN_STATIC("count")), malp_core_count);
-	env_set(env, new_symbol("=", STRLEN_STATIC("=")), malp_core_EQUAL);
-	env_set(env, new_symbol("<", STRLEN_STATIC("<")), malp_core_LT);
-	env_set(env, new_symbol("<=", STRLEN_STATIC("<=")), malp_core_LE);
-	env_set(env, new_symbol(">", STRLEN_STATIC(">")), malp_core_GT);
-	env_set(env, new_symbol(">=", STRLEN_STATIC(">=")), malp_core_GE);
-	env_set(env, new_symbol("slurp", STRLEN_STATIC("slurp")), malp_core_slurp);
-	env_set(env, new_symbol("read-string", STRLEN_STATIC("read-string")), malp_core_readMINUSstring);
-	env_set(env, new_symbol("atom", STRLEN_STATIC("atom")), malp_core_atom);
-	env_set(env, new_symbol("atom?", STRLEN_STATIC("atom")), malp_core_atomQUESTION);
-	env_set(env, new_symbol("deref", STRLEN_STATIC("deref")), malp_core_deref);
-	env_set(env, new_symbol("reset!", STRLEN_STATIC("reset!")), malp_core_resetIMPURE);
-	env_set(env, new_symbol("swap!", STRLEN_STATIC("swap!")), malp_core_swapIMPURE);
-	env_set(env, new_symbol("first", STRLEN_STATIC("first")), malp_core_first);
-	env_set(env, new_symbol("rest", STRLEN_STATIC("rest")), malp_core_rest);
+	env_set(env, new_symbol("+"), malp_core_PLUS);
+	env_set(env, new_symbol("-"), malp_core_MINUS);
+	env_set(env, new_symbol("*"), malp_core_STAR);
+	env_set(env, new_symbol("/"), malp_core_SLASH);
+	env_set(env, new_symbol("number?"), malp_core_numberQUESTION);
+	env_set(env, new_symbol("pr-str"), malp_core_prMINUSstr);
+	env_set(env, new_symbol("str"), malp_core_str);
+	env_set(env, new_symbol("prn"), malp_core_prn);
+	env_set(env, new_symbol("print"), malp_core_print);
+	env_set(env, new_symbol("println"), malp_core_println);
+	env_set(env, new_symbol("list"), malp_core_list);
+	env_set(env, new_symbol("list?"), malp_core_listQUESTION);
+	env_set(env, new_symbol("empty?"), malp_core_emptyQUESTION);
+	env_set(env, new_symbol("count"), malp_core_count);
+	env_set(env, new_symbol("="), malp_core_EQUAL);
+	env_set(env, new_symbol("<"), malp_core_LT);
+	env_set(env, new_symbol("<="), malp_core_LE);
+	env_set(env, new_symbol(">"), malp_core_GT);
+	env_set(env, new_symbol(">="), malp_core_GE);
+	env_set(env, new_symbol("slurp"), malp_core_slurp);
+	env_set(env, new_symbol("read-string"), malp_core_readMINUSstring);
+	env_set(env, new_symbol("atom"), malp_core_atom);
+	env_set(env, new_symbol("atom?"), malp_core_atomQUESTION);
+	env_set(env, new_symbol("deref"), malp_core_deref);
+	env_set(env, new_symbol("reset!"), malp_core_resetIMPURE);
+	env_set(env, new_symbol("swap!"), malp_core_swapIMPURE);
+	env_set(env, new_symbol("first"), malp_core_first);
+	env_set(env, new_symbol("rest"), malp_core_rest);
 	env_set(env, cons_sym, malp_core_cons);
 	env_set(env, concat_sym, malp_core_concat);
-	env_set(env, new_symbol("nth", STRLEN_STATIC("nth")), malp_core_nth);
+	env_set(env, new_symbol("nth"), malp_core_nth);
 }
 
-DEF_BUILTIN_FN(malp_core_numberQUESTION)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_numberQUESTION)(obj args, obj *err)
 {
 	if (args == empty_list) {
 		*err = ArityError; // todo
@@ -63,7 +62,7 @@ DEF_BUILTIN_FN(malp_core_numberQUESTION)(obj args, int *err)
 		false_o;
 }
 
-DEF_BUILTIN_FN(malp_core_PLUS)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_PLUS)(obj args, obj *err)
 {
 	malp_number tmp = {
 		.integer = {
@@ -94,7 +93,7 @@ DEF_BUILTIN_FN(malp_core_PLUS)(obj args, int *err)
 	}
 }
 
-DEF_BUILTIN_FN(malp_core_MINUS)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_MINUS)(obj args, obj *err)
 {
 	if (args == empty_list) {
 		*err = ArityError; // todo
@@ -140,7 +139,7 @@ DEF_BUILTIN_FN(malp_core_MINUS)(obj args, int *err)
 	}
 }
 
-DEF_BUILTIN_FN(malp_core_STAR)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_STAR)(obj args, obj *err)
 {
 	malp_number tmp = {
 		.integer = {
@@ -171,7 +170,7 @@ DEF_BUILTIN_FN(malp_core_STAR)(obj args, int *err)
 	}
 }
 
-DEF_BUILTIN_FN(malp_core_SLASH)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_SLASH)(obj args, obj *err)
 {
 	if (args == empty_list) {
 		*err = ArityError; // todo
@@ -219,41 +218,41 @@ DEF_BUILTIN_FN(malp_core_SLASH)(obj args, int *err)
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
-DEF_BUILTIN_FN(malp_core_prMINUSstr)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_prMINUSstr)(obj args, obj *err)
 {
 	return pr_str_all(args, PRSTRALL_READABLY | PRSTRALL_SPACING);
 }
 
-DEF_BUILTIN_FN(malp_core_str)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_str)(obj args, obj *err)
 {
 	return pr_str_all(args, 0);
 }
 
-DEF_BUILTIN_FN(malp_core_prn)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_prn)(obj args, obj *err)
 {
 	print_string(pr_str_all(args, PRSTRALL_READABLY | PRSTRALL_SPACING), 1);
 	return nil_o;
 }
 
-DEF_BUILTIN_FN(malp_core_print)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_print)(obj args, obj *err)
 {
 	print_string(pr_str_all(args, PRSTRALL_SPACING), 0);
 	return nil_o;
 }
 
-DEF_BUILTIN_FN(malp_core_println)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_println)(obj args, obj *err)
 {
 	print_string(pr_str_all(args, PRSTRALL_SPACING), 1);
 	return nil_o;
 }
 
-DEF_BUILTIN_FN(malp_core_list)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_list)(obj args, obj *err)
 {
 	return args;
 }
 #pragma GCC diagnostic pop
 
-DEF_BUILTIN_FN(malp_core_listQUESTION)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_listQUESTION)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	if (List == LIST_FIRST(args)->type) {
@@ -262,7 +261,7 @@ DEF_BUILTIN_FN(malp_core_listQUESTION)(obj args, int *err)
 	return false_o;
 }
 
-DEF_BUILTIN_FN(malp_core_emptyQUESTION)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_emptyQUESTION)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	if (List != LIST_FIRST(args)->type) {
@@ -275,7 +274,7 @@ DEF_BUILTIN_FN(malp_core_emptyQUESTION)(obj args, int *err)
 	return false_o;
 }
 
-DEF_BUILTIN_FN(malp_core_count)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_count)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	if (LIST_FIRST(args) == nil_o) return new_int(0);
@@ -286,7 +285,7 @@ DEF_BUILTIN_FN(malp_core_count)(obj args, int *err)
 	return new_int((malp_int_t)LIST_FIRST(args)->list.count);
 }
 
-DEF_BUILTIN_FN(malp_core_EQUAL)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_EQUAL)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args == empty_list, *err); // todo
 	if (args->list.count == 1) return true_o;
@@ -356,7 +355,7 @@ DEF_BUILTIN_FN(malp_core_EQUAL)(obj args, int *err)
 	return true_o;
 }
 
-DEF_BUILTIN_FN(malp_core_LT)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_LT)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(empty_list == args, *err);
 
@@ -380,7 +379,7 @@ DEF_BUILTIN_FN(malp_core_LT)(obj args, int *err)
 	return true_o;
 }
 
-DEF_BUILTIN_FN(malp_core_LE)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_LE)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(empty_list == args, *err);
 
@@ -404,7 +403,7 @@ DEF_BUILTIN_FN(malp_core_LE)(obj args, int *err)
 	return true_o;
 }
 
-DEF_BUILTIN_FN(malp_core_GT)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_GT)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(empty_list == args, *err);
 
@@ -428,7 +427,7 @@ DEF_BUILTIN_FN(malp_core_GT)(obj args, int *err)
 	return true_o;
 }
 
-DEF_BUILTIN_FN(malp_core_GE)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_GE)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(empty_list == args, *err);
 
@@ -452,7 +451,7 @@ DEF_BUILTIN_FN(malp_core_GE)(obj args, int *err)
 	return true_o;
 }
 
-DEF_BUILTIN_FN(malp_core_readMINUSstring)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_readMINUSstring)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	if (LIST_FIRST(args)->type != String) {
@@ -462,7 +461,7 @@ DEF_BUILTIN_FN(malp_core_readMINUSstring)(obj args, int *err)
 	return read_str(LIST_FIRST(args)->string.value);
 }
 
-DEF_BUILTIN_FN(malp_core_slurp)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_slurp)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	if (LIST_FIRST(args)->type != String) {
@@ -491,19 +490,19 @@ DEF_BUILTIN_FN(malp_core_slurp)(obj args, int *err)
 	return res;
 }
 
-DEF_BUILTIN_FN(malp_core_atom)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_atom)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	return new_atom(LIST_FIRST(args));
 }
 
-DEF_BUILTIN_FN(malp_core_atomQUESTION)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_atomQUESTION)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	return LIST_FIRST(args)->type == Atom ? true_o : false_o;
 }
 
-DEF_BUILTIN_FN(malp_core_deref)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_deref)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	if (LIST_FIRST(args)->type != Atom) {
@@ -513,7 +512,7 @@ DEF_BUILTIN_FN(malp_core_deref)(obj args, int *err)
 	return LIST_FIRST(args)->atom.value;
 }
 
-DEF_BUILTIN_FN(malp_core_resetIMPURE)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_resetIMPURE)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 2, *err);
 	if (LIST_FIRST(args)->type != Atom) {
@@ -524,7 +523,7 @@ DEF_BUILTIN_FN(malp_core_resetIMPURE)(obj args, int *err)
 	return LIST_SECOND(args);
 }
 
-DEF_BUILTIN_FN(malp_core_swapIMPURE)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_swapIMPURE)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count < 2, *err);
 	if (LIST_FIRST(args)->type != Atom ||
@@ -536,20 +535,14 @@ DEF_BUILTIN_FN(malp_core_swapIMPURE)(obj args, int *err)
 	obj fn = LIST_SECOND(args);
 	args = args->list.rest->list.rest;
 	args = cons(args, atom->atom.value);
-	if (fn->type == BuiltinFn) {
-		args = fn->builtin_fn.fn(args, err);
-	} else {
-		obj env = new_env((unsigned) fn->fn.binds->list.count, fn->fn.env);
-		env_bind_args(env, fn->fn.binds, args, err);
-		if (*err) return NULL;
-		args = EVAL(fn->fn.ast, env, err);
-	}
+	args = cons(args, fn);
+	args = invoke_form(args, NULL, err);
 	if (*err) return NULL;
-	atom->atom.value = args; // here comes the mutex update
+	atom->atom.value = args; // todo: mutex update
 	return args;
 }
 
-DEF_BUILTIN_FN(malp_core_first)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_first)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	args = LIST_FIRST(args);
@@ -565,7 +558,7 @@ DEF_BUILTIN_FN(malp_core_first)(obj args, int *err)
 		   args->list.first;
 }
 
-DEF_BUILTIN_FN(malp_core_rest)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_rest)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 1, *err);
 	args = LIST_FIRST(args);
@@ -581,7 +574,7 @@ DEF_BUILTIN_FN(malp_core_rest)(obj args, int *err)
 		   args->list.rest;
 }
 
-DEF_BUILTIN_FN(malp_core_cons)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_cons)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 2, *err);
 	obj x = LIST_FIRST(args);
@@ -601,7 +594,7 @@ static obj concat_helper_cons(obj pre, obj post)
 	return cons(concat_helper_cons(pre->list.rest, post), pre->list.first);
 }
 
-DEF_BUILTIN_FN(malp_core_concat)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_concat)(obj args, obj *err)
 {
 	if (empty_list == args) return args;
 	obj first = LIST_FIRST(args);
@@ -617,7 +610,7 @@ DEF_BUILTIN_FN(malp_core_concat)(obj args, int *err)
 	return concat_helper_cons(first, args);
 }
 
-DEF_BUILTIN_FN(malp_core_nth)(obj args, int *err)
+DEF_BUILTIN_FN(malp_core_nth)(obj args, obj *err)
 {
 	RET_ARITY_ERROR_IF(args->list.count != 2, *err);
 	obj list = LIST_FIRST(args);
@@ -635,4 +628,22 @@ DEF_BUILTIN_FN(malp_core_nth)(obj args, int *err)
 		list = list->list.rest;
 	}
 	return LIST_FIRST(list);
+}
+
+static obj apply_conj_helper(obj args)
+{
+	if (args->list.count > 1)
+		return cons(apply_conj_helper(args->list.rest), LIST_FIRST(args));
+	return LIST_FIRST(args);
+}
+
+DEF_BUILTIN_FN(malp_core_apply)(obj args, obj *err)
+{
+	RET_ARITY_ERROR_IF(args->list.count < 2, *err);
+	if (coll_last(args)->type != List) {
+		*err = new_message_error("Last argument to apply must be sequential");
+		return NULL;
+	}
+	args = apply_conj_helper(args);
+	invoke_form(args, NULL, err);
 }

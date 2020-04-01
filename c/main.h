@@ -3,6 +3,6 @@
 
 #include "types.h"
 
-obj EVAL(obj ast, obj env, int *err);
+obj EVAL(obj ast, obj env, obj *err);
 
 #endif

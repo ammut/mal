@@ -2,9 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <stdarg.h>
 
 #include "types.h"
 #include "math.h"
+#include "main.h"
+#include "env.h"
 
 #ifdef MPS
 #define ALIGNMENT sizeof(mps_word_t)
@@ -24,6 +27,42 @@
    ? ALIGN_WORD(size)                                  \
    : ALIGN_WORD(sizeof(malp_fwd)))
 
+char *type_name_string(obj object)
+{
+	switch (object->type) {
+		case List:
+			return "List";
+		case Int:
+		case Real:
+		case Ratio:
+			return "Number";
+		case Symbol:
+			return "Symbol";
+		case Keyword:
+			return "Keyword";
+		case Nil:
+			return "Nil";
+		case True:
+		case False:
+			return "Bool";
+		case String:
+			return "String";
+		case Atom:
+			return "Atom";
+		case BuiltinFn:
+		case Fn:
+			return "Function";
+		case Error:
+			return "Error";
+		case Vector:
+			return "Vector";
+		case HashMap:
+			return "HashMap";
+		default:
+			printf("missing type string: %d\n", object->type);
+			exit(1);
+	}
+}
 
 // LIST
 
@@ -54,10 +93,29 @@ obj new_list()
 	return r;
 }
 
+obj new_list_from(size_t count, ...)
+{
+	if (0 == count) return empty_list;
+
+	obj head = NULL;
+	obj tail = head;
+
+	va_list elements;
+	va_start(elements, count);
+	size_t cnt = count;
+	while (cnt-- > 0) {
+		tail = append_mutating(tail, va_arg(elements, obj));
+		if (NULL == head) head = tail; // set head
+	}
+	va_end(elements);
+	set_length_mutating(head, count);
+	return head;
+}
+
 obj append_mutating(obj l, obj el)
 {
 	obj tail = new_list();
-	if (!tail) return tail;
+	if (NULL == tail) return tail;
 	if (NULL == l) l = tail;
 	while (l->list.rest != empty_list) {
 		l = l->list.rest;
@@ -70,10 +128,21 @@ obj append_mutating(obj l, obj el)
 
 void set_length_mutating(obj l, size_t c)
 {
-	while (c ) {
+	while (c) {
 		l->list.count = c--;
 		l = l->list.rest;
 	}
+}
+
+obj coll_last(obj collection)
+{
+	if (collection->type == List) {
+		if (collection == empty_list) return empty_list;
+		while (collection->list.rest != empty_list)
+			collection = collection->list.rest;
+		return LIST_FIRST(collection);
+	}
+	return NULL;
 }
 
 // NUMBER
@@ -167,8 +236,9 @@ int is_number(obj o)
 
 // SYMBOL
 
-obj new_symbol(char *token, size_t length)
+obj new_symbol(char *token)
 {
+	size_t length = strlen(token);
 	obj r = malloc(ALIGN_OBJ(sizeof(malp_symbol) + length + 1));
 	if (r == NULL) return r;
 	r->type = Symbol;
@@ -247,13 +317,14 @@ obj new_empty_string(size_t len)
 	return r;
 }
 
-obj new_string(char *value, size_t len)
+obj new_string(char *value)
 {
+	size_t len = strlen(value);
 	obj r  = malloc(ALIGN_OBJ(sizeof(malp_string) + len + 1));
 	if (r == NULL) return r;
 	r->type = String;
 	r->string.length = len;
-	memcpy(r->string.value, value, len);
+	strcpy(r->string.value, value);
 	r->string.value[len] = 0;
 	return r;
 }
@@ -266,7 +337,8 @@ obj read_string(char *token, size_t len)
 	int err = 0;
 	len = decode_malp_string(buf, token + 1, len - 2, &err);
 	if (err) return NULL;
-	return new_string(buf, len);
+	buf[len] = 0;
+	return new_string(buf);
 }
 
 static int decode_hex(char **buffer, char **token, int *err);
@@ -426,6 +498,33 @@ obj new_fn(obj ast, obj env, obj binds)
 	r->fn.env = env;
 	r->fn.binds = binds;
 	return r;
+}
+
+obj invoke_form(obj form, obj env, obj *err)
+{
+	obj first = LIST_FIRST(form);
+	obj args = form->list.rest;
+	switch (first->type) {
+		case BuiltinFn:
+			return first->builtin_fn.fn(args, err);
+		case Fn:
+			env = new_env((unsigned) first->fn.binds->list.count,
+							  first->fn.env);
+			env_bind_args(env, first->fn.binds, args, err);
+			if (*err) { return NULL; }
+			return EVAL(first->fn.ast, env, err);
+		case Keyword:
+			return NULL; // todo
+		case HashMap:
+			return NULL; // todo
+		default: {
+			char fmt[] = "%s is not callable";
+			obj msg = new_empty_string(sizeof(fmt) + 10);
+			sprintf(msg->string.value, fmt, type_name_string(first));
+			*err = new_error(msg);
+			return NULL;
+		}
+	}
 }
 
 // ENV

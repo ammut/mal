@@ -30,7 +30,7 @@ static size_t string_lengths(obj l)
 
 static obj pr_str_readably(obj str)
 {
-	char buf[str->string.length * 2 + 2]; // *2 for \x -> \\x, +2 for ""
+	char buf[str->string.length * 2 + 2 + 1]; // *2 for \x -> \\x, +2 for "", +1 for zero-terminator
 	char *const value = str->string.value;
 
 	size_t buf_pos = 0;
@@ -76,7 +76,8 @@ static obj pr_str_readably(obj str)
 		}
 	}
 	buf[buf_pos++] = '"';
-	return new_string(buf, buf_pos);
+	buf[buf_pos] = 0;
+	return new_string(buf);
 }
 
 obj pr_str_all(obj ast, int flags)
@@ -143,22 +144,22 @@ obj pr_str(obj ast, int print_readably)
 		case Int: {
 			char buf[21] = { 0 }; // longest int value
 			sprintf(buf, "%" PRId64, ast->integer.value);
-			return new_string(buf, strlen(buf));
+			return new_string(buf);
 		}
 		case Real: {
 			char buf[16] = { 0 }; // - . e EXP(- <4>) \0
 			sprintf(buf, "%lg", ast->real.value);
-			return new_string(buf, strlen(buf));
+			return new_string(buf);
 		}
 		case Ratio: {
 			char buf[41] = {0};
 			sprintf(buf, "%" PRId64 "/%" PRIu64, ast->ratio.numerator,
 				   ast->ratio.denominator);
-			return new_string(buf, strlen(buf));
+			return new_string(buf);
 		}
 		case Symbol:
 		case Keyword:
-			return new_string(ast->symbol.name, strlen(ast->symbol.name));
+			return new_string(ast->symbol.name);
 		case Nil:
 			if (print_readably) return nil_str;
 			return empty_string;
@@ -182,6 +183,6 @@ obj pr_str(obj ast, int print_readably)
 		case Vector:
 		case HashMap:
 		default:
-			return new_string("<impl missing>", 14);
+			return new_string("<impl missing>");
 	}
 }
